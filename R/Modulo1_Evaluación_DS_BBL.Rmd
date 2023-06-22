@@ -1,0 +1,371 @@
+---
+title: "Evaluación Módulo 1"
+author: "Bárbara Bellón Lara"
+date: "3/2/2020"
+output: 
+    html_document:
+      highlight: tango
+      theme: simplex
+      toc: true
+      toc_float: true
+        
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Vectores
+
+## Ejercicio 1. 
+- Cree el vector A utilizando la función `seq`, de tal modo que se obtenga el siguiente resultado: 10, 8, 6, 4, 2, 0, -2, -4, -6.
+¿Qué longitud tiene este vector? ¿Cuál es su suma? ¿Cuál es su valor medio? ¿Cuál es su error típico?
+El error típico se obtiene dividiendo la desviación típica entre la raíz cuadrada del tamaño de la muestra (número de elementos).
+
+```{r}
+A<-seq(10,-6,-2)
+
+A
+longitud <- length(A)
+paste('la longitud del vector es: ', longitud)
+suma <- sum(A)
+paste('la suma del vector es: ', suma)
+media <- mean(A)
+paste('la media del vector es: ', media)
+error_tipico <- sd(A)/sqrt(longitud)
+paste('El error típico del vector es: ', error_tipico)
+
+```
+
+## Ejercicio 2. 
+- Utilizando las funciones `rep` y `seq`, cree el vector B, con los siguientes datos: 0, 0, 0, 0, 0, 1, 2.5, 4, 5.5. Calcule: la suma de A y B, la diferencia entre A y B, $\sqrt{A²+B²}$.
+```{r}
+B <- c(rep(0,5),seq(1,5.5,1.5))
+B
+```
+La suma de A y B
+```{r}
+A+B
+```
+
+La diferencia entre A y B
+
+```{r}
+A-B
+```
+
+$\sqrt{A^2+B^2}$
+```{r}
+sqrt((A^2+B^2))
+```
+
+# Matrices
+
+## Ejercicio 3. 
+- Cree la matriz M con estos datos, indicando el nombre de cada columna. Muestre la dimensión de la matriz. Utilizando la función `apply`, obtenga un promedio de los resultados por columna.
+
+```{r}
+M <- matrix(data = c(74,85,58,80,1.68,1.83,1.58,1.72,22,25,21,20), nrow = 4)
+colnames(M) <- c("PESO", "ESTATURA", "EDAD")
+M
+```
+
+Promedio de los resultados por columna
+
+```{r}
+apply(M,2,mean)
+```
+# Dataframes
+
+## Ejercicio 4. 
+- Con los datos de la matriz anterior, cree el dataframe datos.
+
+```{r}
+datos <- data.frame(M)
+datos
+```
+
+- Añada dos columnas, con el nombre de los individuos: "Pedro", "José", "María", "Javier"; y el sexo: "Hombre" y "Mujer".
+
+```{r}
+datos$NOMBRE <- c("Pedro","José", "María", "Javier")
+datos$SEXO <- c("Hombre","Hombre","Mujer","Hombre")
+datos$SEXO <- factor(datos$SEXO)
+datos
+```
+
+- Añada un nuevo individuo al conjunto de datos: "Ana", peso=70, estatura=1.72 y edad=24.
+
+Para añadir un nievo individuo al conjunto de datos se utiliza la función rbind, que añade una nueva `row` al dataframe, me diante una lista que contiene los datos de cada campo.
+```{r}
+datos <- rbind(datos, list(70,1.72,24, "Ana", "Mujer"))
+datos
+```
+
+-La variable nombre es de tipo carácter, sexo es un factor y el resto son numéricas.
+
+Muestre la estructura del dataframe datos.
+
+```{r}
+str(datos)
+```
+Efectivamente se comprueba que nombre es de tipo `char`, sexo es un factor y el resto son numéricas.
+
+## Ejercicio 5. 
+- Del dataframe creado, extraiga: el peso de Ana, todos los nombres y los datos de Javier.
+El nombre de Ana
+```{r}
+datos$PESO[datos$NOMBRE == "Ana"]
+datos$NOMBRE
+datos[datos$NOMBRE == "Javier",]
+
+```
+
+
+
+- Añada una columna al dataframe datos, denominada ALTURA. De tal modo que, si el individuo mide más 1.78, tendrá el valor "Alto"; y de lo contrario, tendrá el valor "Normal".
+
+```{r}
+datos$ALTURA <- ifelse(datos$ESTATURA>1.78, "Alto","Normal")
+datos
+```
+
+# Listas
+
+## Ejercicio 6. 
+- Cree la lista L, con todos los objetos que ha creado. 
+```{r}
+L <- list(A,B,M,datos)
+names(L) <- c("A", "B", "M","datos") #se pone nombre a cada uno de los elementos de la lista
+L
+```
+
+- Encuentre en la lista, los valores de A que cumplen la condición A+2<0
+
+
+```{r}
+L$A+2<0
+which(L$A+2<0)
+L$A[L$A+2<0]
+```
+
+Para ello se han usado tres métodos, en el primero te muestra las posiciones del vector y cuáles cumplen la condición con un booleano. En la segunda se muestran los índices de los valores de a que cumplen la condición, como se observa coinciden con los dos `TRUE` del vector de arriba. Por ultimo se muestan los valores que cumplen dicha condición. Esto podría hacerse de otras muchas maneras.
+
+
+- El valor [3,2] de la matriz M
+```{r}
+L$M[3,2]
+```
+
+- Los datos de Ana del dataframe datos.
+
+```{r}
+L$datos[5,]
+L$datos[datos$NOMBRE == "Ana",]
+```
+
+Se puede hacer si se sabe que puesto ocupa Ana en la lista, con la primera sentencia, o más sencillo, buscando en la lista los datos que cumplan con la condición de nombre "Ana".
+
+# Funciones y Bucles
+
+## Ejercicio 7. 
+- Cree la función normalizar, que realice la normalización estándar (restar la media y dividir por el error típico) y la normalización min-max (restar el mínimo y dividir por la diferencia entre el máximo y el mínimo). Dicha función devolverá una lista.
+
+
+```{r}
+normalizar<-function(x){
+  normal_estandar <- (x-mean(x))/(sd(x)) #He dividido entre sd(x) como había confusión en el foro.
+  #En el caso que sea el error tipico habria que dividir por sd(x)/sqrt(length(x))
+  normal_min_max <- (x-min(x))/(max(x)-min(x))
+  #Se unen los dos resultados en una lista
+  normalizacion <- list(normal_estandar,normal_min_max)
+  #Se nombran los dos elementos de la lista para que se sepa cual es cada normalización
+  names(normalizacion) <- c("Normalización estándard", "Normalización min-max")
+  normalizacion
+}
+
+```
+- Utilice esta función empleando como argumento el PESO del dataframe datos, y después empleando la ESTATURA.
+Para comprobar la función usamos el peso del dataframe datos 
+```{r}
+normalizar(datos$PESO)
+```
+Y el dato de estatura
+```{r}
+normalizar(datos$ESTATURA)
+```
+
+## Ejercicio 8. 
+- Mediante un bucle `for`, cree un vector que contenga los primeros 100 elementos de la siguiente sucesión numérica: $\frac{1}{2},\frac{1}{4},\frac{1}{8},\frac{1}{16},\frac{1}{32},...$
+```{r}
+x <- vector() #Se crea un vector vacío que se llenará elemento a elemento en el bucle
+
+for (i in c(1:100)) {
+  x[i] <- 1/(2^i) #cada elemento i del vector x se corresponde con la operacion 1/2^i
+}
+x
+```
+
+
+- ¿Cuál es su suma?
+```{r}
+sum(x)
+```
+
+
+La suma total del vector x es 1. A partir de un cierto número de elementos en el vector la suma es 1, es una propiedad de estas sucesiones: $$\sum^{\infty}_{i=1} \frac{1}{2^i}=1$$ 
+Se puede comprobar cambiando el número de elementos que a partir de 20 la suma es 1 e independientemente de lo grande que sea, la suma seguirá siendo uno. Nótese que a mayor sea el número de elementos, los elementos van haciéndose cada vez más pequeños
+
+# Dataframes y gráficos
+
+En los siguientes ejercicios trabajará con el dataset `mtcars`, que consta de 32 coches y 11 variables. Descripción de las variables que se van a utilizar:
+
+- `mpg`: Millas recorridas por galón de combustible.
+- `cyl`: Número de cilindros.
+- `hp`: Caballos de fuerza.
+- `wt`: Peso (1000 libras).
+- `qsec`: Tiempo empleado en recorrer 1/4 de milla (segundos).
+
+```{r}
+str(mtcars)
+```
+
+## Ejercicio 9. 
+- ¿Cuáles son los 5 coches más pesados?
+
+Para calcular cuales son los coches mas pesados se ha ordenado el dataframe por el peso de los coches en orden decrecientes y luego se han seleccionado los 5 primeros.
+```{r}
+mas_pesados <- mtcars[order(mtcars$wt, decreasing = TRUE),][1:5,]
+
+```
+
+```{r results='asis'}
+knitr::kable(mas_pesados, caption = "5 coches más pesados")
+
+```
+
+- ¿Qué coches tienen 8 cilindros y 175 o más caballos de fuerza? (ordene el resultado por caballos de fuerza)
+
+```{r results='hide'}
+mtcars_s1 <- subset(mtcars, mtcars$cyl == 8 & mtcars$hp >= 175,select = c("cyl","hp"))
+mtcars_s2 <- mtcars_s1[order(mtcars_s1$hp, decreasing = TRUE),]
+```
+```{r results='asis'}
+knitr::kable(mtcars_s2, caption = "Coche con 8 cilindros y 175 o más caballos de fuerza")
+
+```
+
+Se ha hecho un subset con los coches con 8 cilindros y 175 hp o más y luego se ha ordenado. En este caso se ha escogido solamente mostrar las columnas `cyl` y `hp` pero si se elemina la sentencia select, se mostrarían todos los campos del subset.
+
+- ¿Cuál es el coche más rápido?
+
+El coche más rápido será el que menos tiempo tarde en recorrer 1/4 de milla, es decir, el que tenga un `qsec` más bajo.
+
+```{r results='hide'}
+mas_rapido <- subset(mtcars,mtcars$qsec == min(mtcars$qsec))
+```
+```{r results='asis'}
+knitr::kable(mas_rapido, caption = "Coche más rápido")
+
+```
+
+- ¿Cuál es el coche que menos combustible consume?
+
+El coche que menos combustible consume es el que recorra más millas por galón de gasolina consumido, es decir, el que tenga el valor más alto de `mpg`.
+```{r results='hide'}
+menor_consumo <- subset(mtcars,mtcars$mpg == max(mtcars$mpg))
+```
+
+```{r results='asis'}
+knitr::kable(menor_consumo, caption = "Coche con menor consumo")
+
+```
+
+- ¿Cuál es el consumo medio de los coches de 4 cilindros?
+
+```{r results='asis'}
+knitr::kable(subset(mtcars,mtcars$cyl == 4))
+
+```
+```{r}
+mean(subset(mtcars,mtcars$cyl == 4)$mpg)
+```
+
+
+Los coches de 4 cilindros recorren una media de 26.66 mpg, por lo tanto para saber el consumo en unos valores mas intuitivos podemos hacer la inversa:
+```{r}
+consumo = 1/mean(subset(mtcars,mtcars$cyl == 4)$mpg)
+consumo
+```
+Eso nos da los galones que consume por milla, pero estamos acostumbrados a ver el consumo no por milla, sino en 100 millas por ejemplo, nos da una idea más clara del consumo del coche.
+
+```{r}
+consumo*100
+```
+La media de consumo de los coches de 4 cilindros de es 3.75 galones de gasolina cada 100 millas.
+
+
+## Ejercicio 10. 
+- Cree un histograma del peso de los coches, y mediante la función abline dibuje: una línea vertical (roja) en la media de la distribución y otra línea vertical (verde) en la mediana de la distribución.
+
+```{r}
+hist(mtcars$wt,xlab = 'Peso', ylab = "", 
+     main = "Histograma Peso de mtcars")
+abline(v = mean(mtcars$wt),col = "red")
+abline(v = median(mtcars$wt), col = "green")
+```
+
+## Ejericcio 11. 
+- Cree un gráfico que muestre la relación entre el peso y las millas por galón: mpg en función de wt. Interprete el gráfico.
+
+```{r}
+plot(mtcars$wt,mtcars$mpg, 
+     xlab = "Peso (*1000 lb)", 
+     ylab = "millas/galón")
+```
+
+En el gráfico se observa como disminuye el rendimiento de la gasolina al aumentar el peso, es decir, como a mas peso el coche es capaz de recorrer menos distancia por galón consumido, esto puede apreciarse mejor si hacemos una regresión lineal:
+```{r}
+mod1=lm(mpg~wt, data = mtcars)
+summary(mod1)
+plot(mtcars$mpg~mtcars$wt, 
+     xlab = "Peso (*1000 lb)", 
+     ylab = "millas/galón")
+
+lines(mod1$fitted~mtcars$wt)
+```
+
+En esta regresión se ve como línea que regresa los datos es decreciente, así como el factor $\beta_1$ que acompaña a la explicativa, que tiene un valor de -5.34. Hay que tener cuidado al interpretar estos resultados porque nos pueden llevar a pensar que el consumo disminuye con el peso, una manera de solucionarlo para verlo mas claramente sería representar la inversa de `mpg`, que nos daría los galones por milla y multiplicarlo por 100 para que nos de los galones cada 100 millas. Lo cual es un valor más directo e intuitivo en la medida del consumo.
+
+```{r}
+gpm<-100/mtcars$mpg
+plot(mtcars$wt,gpm, xlab="Peso (*1000 lb)", 
+     ylab="Galón/100millas", 
+     main="Galones a las 100 millas consumidos en función del peso del coche")
+```
+
+En este gráfico se muestra cuantos galones se consumen por 100 millas recorrida, el cual es creciente con el peso del vehículo.
+
+
+## Ejercicio 12. 
+- Convierta la variable `cyl` en un factor. 
+
+
+```{r}
+mtcars$cyl.f<-as.factor(mtcars$cyl)
+```
+
+- A continuación, cree un diagrama de caja que represente los caballos de fuerza en función del número de cilindros. Interprete el gráfico.
+
+```{r}
+boxplot(hp~cyl.f,data=mtcars, 
+        main="Diagrama de Cajas Caballos de vapor ~ cilindros", 
+        xlab = "Cilindros",
+        ylab="Caballos de vapor")
+```
+
+Se observa en el gráfico como al aumentar el número de cilindros aumenta la potencia del coche, esto es lógico debido a que a mas cilindros más capacidad tiene el coche de producir potencia instantánea. Es decir, si yo tengo 4 cilindros, la capacidad de crear energía estará limitada por esos cuatro, si tengo el doble, la capacidad de crear energía es mayor.
+
+Otro aspecto interesante que se aprecia en el gráfico es la dispersión que aumenta al aumentar el número de cilindros. En el caso de 6 cilindros la dispersión es la más pequeña de todas, pero nos muestra un outlier bastante lejano al valor medio. 
+
+Finalmente puede verse ese acotamiento de la potencia en los valores maximos en las distintas cajas, que aproximadamente coinciden con el valor del bigote inferior o entre la caja y el bigote, por tanto sí, el númeor de cilindros limita la potencia máxima que puede obtenerse.

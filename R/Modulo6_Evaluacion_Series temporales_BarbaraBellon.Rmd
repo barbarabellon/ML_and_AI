@@ -1,0 +1,419 @@
+---
+title: "Evaluación módulo 6"
+author: "Bárbara Bellón Lara"
+date: "22/06/2020"
+output:  
+    html_document:
+      highlight: tango
+      theme: simplex
+      toc: true
+      fig_width: 7 
+      fig_height: 4
+      fig_align: "center"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Carga de paquetes
+
+Primero se cargan los paquetes necesarios
+
+```{r message=FALSE}
+Sys.setenv(JAVA_HOME='C:\\Program Files\\Java\\jre1.8.0_251') # for 64-bit version
+library(rJava)
+library(lubridate)
+library(xts)
+library(vars)
+library(KernSmooth)
+library(ggplot2)
+library(ggpubr)
+library(tseries)
+library(ggfortify)
+library(zoo)
+library(descomponer)
+library(timsac)
+library(RJDemetra)
+library(forecast)
+```
+
+
+## Ejercicio 1
+
+
+1. Lea el fichero raw_ny_D.csv que contiene datos de movilidad de Nueva York de frecuencia diaria, presente los 10 primeros y últimos registros, realice un gráfico temporal de la variable index y comente la dinámica temporal de la serie.
+
+
+```{r}
+
+#working directory
+path<-"C:\\Users\\Barbara\\Dropbox\\EvaluacionM6"
+setwd(path)
+
+#lectura de datos
+archivos<-dir(path = path, pattern = "raw_*", all.files = T,
+    full.names = T)
+
+data <- read.csv(file=archivos,stringsAsFactors = F)
+data$date<-as.Date(data$date)
+```
+```{r}
+head(data)
+tail(data)
+
+ts1<-ts(data$index)
+
+autoplot(ts1)+ ggtitle("Movilidad Nueva York") + xlab("dia") + ylab("Frec")
+```
+
+
+Se observa un grafico que muestra estacionalidad, sin mostrar tendencia, hasta que sufre un desplome en marzo de 2020. El 13 de enero de este año fue lunes, por lo tanto la movilidad aumenta durante la semana teniendo el pico en los viernes/sábados y el día de menos movilidad el domingo. El desplome es debido a la crisis del coronavirus, llegando a minimos a finales de marzo, que es cuando el virus alcanza su maxima expansion y la mayor parte de paises decretan confinamientos par ala población. Los datos de movilidad caen a más de la mitad de sus valores medios. 
+
+
+2. Realice un suavizado de la variable index, por medias móviles, utilizando la función kernel-smooth, smooth-splines, y utilizando la Regresión Band Spectrum. Presente los resultados en un gráfico, analice los resultados y comente las diferencias metodológicas que existen entre las cuatro técnicas.
+
+Se van a realizar distintos alisados de la serie temporal, hay que tener en cuenta que el parámetro de alisado va a depender de que es lo que se quiere analizar y predecir más tarde, si solo se quiere analizar la tendencia se usarán parámetros que suavicen más la serie, mientras que si se quieren capturar las fluctuaciones, se utilizarán parámetros que suavicen menos la serie.
+
+- Alisado con medias móviles
+```{r}
+#Medias Móviles
+#Alisado MA centrados
+alisado1 = rollmean(ts1, 5,align = "center")
+#Alisado MA no centrados
+alisado2 = rollmean(ts1,5, align="left")
+#Hacemos la gráfica para comparar
+autoplot(ts1) +
+  autolayer(ts1,color="black", series="Original") +
+  autolayer(alisado1, series="Media móvil centrada")+
+  autolayer(alisado2, series= "Media móvil no centrada")
+
+```
+
+Se observa como en la media móvil no centrada los datos empiezan en el mismo punto que la serie original, sin embargo en la centrada, los datos están centrados en la serie, faltando puntos del principio y del final. Se ha escogido un orden = 5, para capturar la tendencia. Si se aumenta el orden se eliminarán más irregularidades de la serie, sin embargo se perderán más datos. Un orden más pequeño seguiría la serie con más rapidez.
+
+- Estimadores núcleo
+
+```{r}
+#calculo de la ventana 
+bandwidth = dpill(data$date, data$index)
+ts1.kernel1<-ksmooth(data$date, data$index, "normal", bandwidth =10)
+ts1.kernel2<-ksmooth(data$date, data$index, "normal", bandwidth = 2)
+ts1.kernel3<-ksmooth(data$date, data$index, "normal", bandwidth = 5)
+ts1.kernel4<-ksmooth(data$date, data$index, "normal", bandwidth = bandwidth)
+
+autoplot(ts1)+
+  autolayer(ts1, series="Original", color = "black")+
+  autolayer(ts(ts1.kernel1$y), series="bw=10")+
+  autolayer(ts(ts1.kernel2$y), series="bw=2")+
+  autolayer(ts(ts1.kernel3$y), series="bw=5")+
+  autolayer(ts(ts1.kernel4$y), series= paste("bw=",round(bandwidth,digits = 1)))
+```
+
+Se han probado distintos valores de ancho de ventana, uno el proporcionado con la función `dpill` que proporciona un ancho de ventana de 3.8. Tambien se han probado 2, 5 y 10. Se observa que con 10 la tendencia de la serie está muy bien representada, sin embargo no se obserban las fluctuaciones. A medida que se disminuye el ancho de ventana las fluctuaciones son mejor capturadas. 
+
+- Smoothing splines
+
+```{r}
+#dejamos que R seleccione el mejor parámetro mediante validación cruzada generalizada (GCV)
+ts1.spl1<-smooth.spline(ts1)
+ts1.spl1
+ts1.spl2<-smooth.spline(ts1, spar=0.5)
+ts1.spl2
+ts1.spl3<-smooth.spline(ts1, spar=0.25)
+ts1.spl3
+
+autoplot(ts1, color="black")+
+  autolayer(ts(ts1.spl1$y), series= "spar(GCV)=0.117")+
+  autolayer(ts(ts1.spl2$y), series = "spar=0.50")+
+  autolayer(ts(ts1.spl3$y), series = "spar=0.25")
+```
+
+Para realizar el suavizado mediante splines se utiliza principalmente el parámetro spar. El parámetro de suavizado elegido por el modelo despues de 15 iteraciones mediante GCV es de 0.117, como se observa, la serie suavizada sigue muy bien la serie de datos original. Conforme se aumenta el parámetro de suavizado, las fluctuaciones disminuyen. 
+
+- Band Spectrum
+```{r}
+indice=1:101 #datos de la serie
+band_s=rdf(ts1,indice)
+
+autoplot(ts1)+
+  autolayer(ts1, color="black")+
+  autolayer(ts(band_s$datos$F), series= "Band spectrum")
+```
+
+La regresión band espectrum da una funcion lineal, esto ocurre si de todos los modelos estumados no encuentra estimadores significativos. Se observa como la serie no es estacionaria ni en media ni en varianza:
+
+
+
+
+```{r}
+adf.test(ts1)
+```
+
+Se acepta entonces la hipotesis nula de no estacionareidad. Si se diferencia la serie una vez
+
+```{r}
+adf.test(diff(ts1))
+```
+
+En este caso el pvalor es <0.05 y podemos asumir estacionareidad
+
+Si se vuelve a hacer la regresion de band spectrum a la serie diferenciada:
+
+```{r}
+indice=1:100
+band_s_d=rdf(diff(ts1),indice)
+autoplot(diff(ts1))+
+  autolayer(diff(ts1), color="black")+
+  autolayer(ts(band_s_d$datos$F), series= "Band spectrum")
+```
+Al diferenciar la serie y hacerla etacionaria, el modelo band spectrum puede seguir la serie.
+
+- Comparación de métodos de suavizado
+
+```{r}
+autoplot(ts1)+
+  autolayer(ts1, color="black")+
+    autolayer(alisado1, series="Media móvil centrada")+
+  autolayer(ts(ts1.spl1$y), series= "Splines Spar(CV)=0.12")+
+  autolayer(ts(ts1.kernel4$y), series= "Funcion nucleo bw=3.8")+
+  autolayer(ts(band_s$datos$F), series= "Band spectrum")
+```
+
+Vemos como los suavizados son muy similares, dependiendo del parámetro usado, suavizan más o menos la serie. El método más sencillo de suavizado es la media movil, en la que se indican cuantos valores se van a utilizar para calcular la misma, el inconveniente es que hay pérdida de datos al inicio y final de la serie. 
+
+La función kernel realiza tambien una media de los puntos de la serie, en este caso los datos utilizados no son solo los cercanos, sino que se utiliza toda la serie y se ponderan los datos en función de la cercanía. El ancho de ventana es en el cual los datos de la serie van a tener más importancia. 
+
+El suavizado mendiante splines se realiza ajustando la serie a trozos mediante un parámetro de suavizado, es muy útil para series con formas complicadas. En este caso tambien se utilizada una matrix de ponderación.
+
+Finalmente la regresión band espectrum utiliza las transformaciones al dpominio de la frecuencia para estimar la serie, mediante una combinación de senos y cosenos. Sin embargo en este caso no es capaz de estimar el modelo ya que la serie no es estacionaria en media. una diferenciacion hacen que la serie sea estacionaria y se pueda realizar esta regresión.
+
+La principal diferencia es que esta ultima utiliza los datos transfomados al dominio de la frecuencia. Entre los otros métodos de suavizado la diferencia está en que en las medias moviles solo tienen en cuenta los datos dentro del orden indicado, mientras que en splines se tienen en cuenta los datos de cada una de los trozos definidos y por último la función kerneñ utiliza todos los datos de la serie.
+
+
+## Ejercicio 2
+
+1. Lectura del fichero indust_T1995.csv, en donde se incluye la serie trimestral de Empleo Industria en Cantabria que se inicia en el primer Trimestre de 1995. Cree un objeto ts, liste los datos y realice un gráfico temporal. Analice la dinámica temporal de la serie.
+
+
+```{r}
+
+#working directory
+path<-"C:\\Users\\Barbara\\Dropbox\\EvaluacionM6"
+setwd(path)
+
+#lectura de datos
+archivos<-dir(path = path, pattern = "indust_*", all.files = T,
+    full.names = T)
+
+indust <- read.csv(file=archivos,stringsAsFactors = F)
+
+indust.ts<-ts(indust, start=c(1995,1),frequency=4)
+
+autoplot(indust.ts)
+
+```
+
+La tendencia es creciente hasta 2005, donde sufre una caida, luego vuelve a crecer hasta aproximadamente 2008-2009, donde la tendencia pasa a ser decreciente. La componente estacional es anual, el ruido, no es ruido blanco, porque las variaciones que muestra son desiguales, por lo que habría que diferenciar o tomar logaritmos en la serie para poder analizarla correctamente. 
+
+2. Realice una descomposición por RJDemetra con Tramo-Seats, utilizando RSAfull. Indique las transformaciones y opciones que implica utilizar dicho procedimiento. Exponga el modelo ARIMA que utiliza tramo para descomponer la serie temporal. Muestre si Tramo-Seats indentifica una componente estacional en la serie. En caso afirmativo, responda si es, o no es estable.
+
+```{r}
+#Funciones
+Imprimir_Modelo <- function(modelo, nombre){
+  print(paste0("Análisis de la serie: ", nombre))
+  print(modelo)
+  print(modelo$regarima$model)
+  plot(modelo)
+  plot(modelo$regarima)
+  plot(modelo$decomposition)
+}
+Imprimir_Arima <- function(modelo){
+  modelo
+  summary(modelo)
+  plot(modelo)
+  plot(tendencia.indust, main="Datos vs arima")
+lines(tendencia.indust-modelo$residuals,col="red")
+  a<-autoplot(modelo$residuals)
+  print(a)
+  b<-qplot(modelo$residuals)
+  print(b)
+  tsdiag(modelo)
+  Acf(modelo$residuals)
+  Pacf(modelo$residuals)
+  cpgram(modelo$residuals)
+  jarque.bera.test(modelo$residuals)
+}
+
+```
+
+```{r}
+n.series <- ncol(indust.ts) - 1
+myspec <- tramoseats_spec("RSAfull")
+insdust.rjdem <- tramoseats(indust.ts, myspec)
+```
+
+El modelo arima que utiliza es con una diferenciacion y media movil de orden 1. Los coeficientes son estacionarios e invertibles?, pero el coeficiente Theta(1) no es significativo. Las contribuciones a la serie son sobre todo de ciclo tendencia (16%), irregular y otros sin identificar. No se identifica estacionalidad en la serie. El test de Kruskal-Wallis nos indica que no se puede rechazar la hipotesis nula de igualdad de distribuciones, en este caso la media no cambia entre los trimestres y por tanto no se puede decir que hay estacionalidad.
+
+3.	Descomponga el empleo industrial utilizando decompose. Represente los resultados obtenidos, y extraiga la tendencia. ¿Qué técnica estadística utiliza este método?. Justifique el tipo de componente estacional elegido en el análisis.
+
+
+```{r}
+autoplot(decompose(indust.ts,type = "additive"))
+autoplot(decompose(indust.ts,type = "multiplicative"))
+decomp.indust<-decompose(indust.ts,type = "multiplicative")
+```
+
+Se utiliza el componente estacional multiplicativo ya que proporciona unos errores menores, aunque no se observa que la estacionalidad cambie con la tendencia, sino que es independiente de ella. Se observa que la componente estacional es pequeña comparada con el ciclo normal o con los valores de la tendencia, recordemos que en la descomposición con el tramo SEATS no era observada esta estacionalidad. Esta diferencia puede deberse a que este método no utiliza los test utilizados en los otros para descomponer la serie y no prueba igualdad de medias entre trimestres en este caso. Por tanto este método asumiría la estacionalidad desde el principio.
+
+
+4.	Estime un modelo ARIMA para la tendencia extraída con decompose, y pronostique lo que resta de año. Estime con auto.arima y evalúe los resultados. Represente y comente los resultados obtenidos. ¿Es coherente el modelo que ofrece auto.arima?.
+
+```{r}
+#guardamos en una nueva variable la tendencia obtenida con decompose eliminando los Na obtenidos al hacer medias moviles
+tendencia.indust<-na.omit(decomp.indust$trend)
+plot(tendencia.indust)
+Acf(tendencia.indust)
+Pacf(tendencia.indust)
+```
+
+La funcion de autocorrelación sugiere que el proceso no es estacionario, por lo que habría que tomar diferencias.
+
+```{r}
+tren.d1<-diff(tendencia.indust)
+plot(tren.d1)
+Acf(tren.d1)
+Pacf(tren.d1)
+ndiffs(tendencia.indust)
+adf.test(tren.d1)#test de estacionareidad
+adf.test(diff(tren.d1))
+```
+
+La funcion `ndiffs` indica solo una diferenciacion pero el test de Dickey-Fuller sugiere que a partir de dos es cuando es estacionaria
+
+```{r}
+#tomar log 
+tren.log<-log(tendencia.indust)
+plot(tren.log)
+Acf(tren.log)
+Pacf(tren.log)
+#log y diferencias
+tren.log.d1<-diff(tren.log)
+autoplot(tren.log.d1)
+Acf(tren.log.d1)
+Pacf(tren.log.d1)
+#dos diferencias
+tren.d2<-diff(tren.d1)
+autoplot(tren.d2)
+Acf(tren.d2)
+Pacf(tren.d2)
+```
+
+Tomar logaritmos no cambia la serie. Por lo que es estacionaria en media, pero no en varianza. 
+
+Se puede observar que en la función de autocorrelacion parcial presenta un pico significativo en el lag 4 y 5.
+
+Se prueban varios modelos ARIMA, con dos diferencias. No se van a hacer de procesos de media movil ya que la serie ya esta suavizada.
+
+- Arima(1,2,0)
+```{r}
+arima120<-Arima(tendencia.indust, order=c(1,2,0))
+
+Imprimir_Arima(arima120)
+```
+Los coeficientes se encuentran dentro del circulo unidad, por lo tanto cumplen los supuestos de estacionareidad y son significativos.
+
+Con respecto a los residuos no son constantes en el tiempo y parece que su ampplitud es más alta entre 2002 y 2012 aproximadamente. Con respecto a los test del periodograma y el test de jarque berra los residuos cumplen, sin embargo se salen de las bandas de confianza para los periodogramas.
+
+- Arima(2,2,0)
+```{r}
+arima220<-Arima(tendencia.indust, order=c(2,2,0))
+
+Imprimir_Arima(arima220)
+```
+```{r}
+which(abs(coef(arima220)/c(0.1074 ,  0.1069))<1.92)
+```
+
+El coeficiente 2 no es significativo.
+
+- Arima(3,2,0)
+
+```{r}
+arima320<-Arima(tendencia.indust, order=c(3,2,0))
+
+Imprimir_Arima(arima320)
+```
+```{r}
+which(abs(coef(arima320)/c(0.1074,   0.1163,   0.1076))<1.92)
+```
+Los coeficientes 2 y 3 no son significativos
+
+- Arima(4,2,0)
+```{r}
+arima420<-Arima(tendencia.indust, order=c(4,2,0))
+
+Imprimir_Arima(arima420)
+```
+```{r}
+which(abs(coef(arima420)/c(0.0853,   0.0941,  0.0926 ,  0.0851))<1.92)
+```
+los coeficientes 2 y 3 no son significativos
+
+- Arima(5,2,0)
+```{r}
+arima520<-Arima(tendencia.indust, order=c(5,2,0))
+
+Imprimir_Arima(arima520)
+```
+```{r}
+which(abs(coef(arima520)/c(0.0985,   0.0883,  0.0855,   0.0860,  0.0997))<1.92)
+```
+Todos los coeficientes son significativos, todas las raices caen dentro del circulo unidad y cumple los test de normalidad y no autocorrelacion de residuos.
+
+
+
+Añadimos componente estacional, aunque esa componente ya la hemos sustraído al hacer el modelado sobre la tendencia, al diferenciar dos veces sigue saliendo significativo con 4 lag. Se aplica una diferencia solamente. 
+
+
+```{r}
+arima120s<-Arima(tendencia.indust, order=c(2,1,0), seasonal = c(1,1,0))
+
+Imprimir_Arima(arima120s)
+```
+```{r}
+which(abs(coef(arima120s)/c(0.0914 ,  0.0806))<1.92)
+```
+
+Los coeficientes son significativos, cumple supuestos de estacionareidad y de normalidad de residuos. Pero hay un coeficiente mayor que uno, lo que haría que la varianza: 1-a1^2-a2^2-a3^2>0 sea negativa.
+
+#### Predicción
+
+Los modelos Arima(5,2,0) y Arima(2,1,0)(1,1,0)[4] son los que cumplen todos los test, además los dos tienen un AIC muy parecido. Sin embargo como se ha mencionado anteriormente la componente estacional se ha eliminado de la serie, por tanto no debería tenerse en cuenta ya que se estaría introduciendo un efecto de más.
+
+```{r}
+#se indica h5 para predecir hasta el final del 2018, ya que se han eliminado dos periodos al hacer medias moviles
+prediccion520<-forecast(arima520, h=5)
+
+autoplot(prediccion520)
+  
+prediccion520
+```
+
+Las predicciones indican una tendencia creciente, hasta finales de 2018 donde se observa que se va estabilizando y llegando a un punto de inflexión.
+
+- Autoarima
+
+```{r}
+auto_arima<-auto.arima(tendencia.indust)
+Imprimir_Arima(auto_arima)
+```
+```{r}
+which(abs(coef(auto_arima)/c(0.0864,   0.0845,   0.0829))<1.92)
+```
+
+Se observa que solo se hace una diferencia y que además se añade componente estacional. Se ha visto con el test de Dickey-Fuller que es estacionaria a partir de dos diferencias, a pesar de eso todas las raíces se encuentran dentro del círculo unidad. Por tanto esta estimación no sería coherente. Además si la serie necesita una diferenciación la estacionalidad también la necesitaría.
+
+
+

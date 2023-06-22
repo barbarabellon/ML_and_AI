@@ -1,0 +1,792 @@
+---
+title: "Evaluación Módulo IV"
+author: "Bárbara Bellón Lara"
+date: "14/06/2020"
+output: 
+    html_document:
+      highlight: tango
+      theme: simplex
+      toc: true
+      toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Carga de paquetes
+
+Primero se cargan los paquetes necesarios
+
+```{r message=FALSE}
+library(foreign)
+library(tidyverse)
+library(MASS)
+library(caret)
+library(questionr)
+library(psych)
+library(car)
+library(vegan)
+library(corrplot)
+library(ggplot2)
+library(psy)
+library(gridExtra)
+library(factoextra)
+library(GPArotation)
+library(nFactors) 
+library(readxl)
+library(proxy)
+library(ggpubr)
+library(smacof)
+library(gplots)
+library(tidyverse)
+library(reshape)
+library(CCA)
+```
+
+
+## Ejercicio 1
+
+Considere la base de datos “ehd” incluída en la librería “psy”.
+
+- Busque en la documentación la información asociada a cada una de las variables y realice un resumen sumario de la misma.
+
+- Se considera evaluar la varianza común de los datos utilizando el método de máxima verosimilitud. Si los datos son adecuados, determine el número ideal de factores a obtener, realice el análisis e interprete los factores finalmente obtenidos.
+
+
+```{r}
+data(ehd)
+data1 <- ehd
+
+?ehd
+
+```
+La ayuda nos muestra lo siguiente
+
+    Depressive Mood Scale
+    Description
+    A data frame with 269 observations on the following 20 variables. Jouvent, R et al 1988 La clinique polydimensiónnelle de humeur depressive. Nouvelle version echelle EHD : Polydimensiónal rating scale of depressive mood. Psychiatrie et Psychobiologie.
+
+    Usage
+    data(ehd)
+    Format
+    This data frame contains the following columns:
+
+    e1
+    Observed painfull sadness
+
+    e2
+    Emotional hyperexpressiveness
+
+    e3
+    Emotional instability
+
+    e4
+    Observed monotony
+
+    e5
+    Lack spontaneous expressivity
+
+    e6
+    Lack affective reactivity
+
+    e7
+    Emotional incontinence
+
+    e8
+    Affective hyperesthesia
+
+    e9
+    Observed explosive mood
+
+    e10
+    Worried gesture
+
+    e11
+    Observed anhedonia
+
+    e12
+    Felt sadness
+
+    e13
+    Situational anhedonia
+
+    e14
+    Felt affective indifference
+
+    e15
+    Hypersensibility unpleasent events
+
+    e16
+    Sensory anhedonia
+
+    e17
+    Felt affective monotony
+
+    e18
+    Felt hyperemotionalism
+
+    e19
+    Felt irritability
+
+    e20
+    Felt explosive mood
+
+
+Los datos se refieren a 20 indicadores que están relacionados con la depresión. Se va a ver un sumario de los datos.
+
+```{r}
+summary(data1)
+
+## Cuento el número de valores diferentes para las numéricas
+sapply(Filter(is.numeric, data1),function(x) length(unique(x)))
+```
+
+Se puede observar como todos los indicadores van del 0 al 4. Nos los dan como indicadores numéricos pero se podrían convertir a factores, ya son valores discretos, podemos ver que solo hay 5 valores distintos para cada una de las variables.
+
+```{r}
+#Convierto todo el data frame a factor para poder ver las estadísticas de cada respuesta.
+data1_factor <- data.frame(lapply(data1[,], factor))
+summary(data1_factor)
+```
+
+Al convertir los datos en factores el resumen nos muestra el número de veces que se ha dado cada respuesta en cada uno de las variables. Si consideramos que el estudio se ha hecho de manera aleatoria, se puede considerar las respuestas como una escala del 0 al 4 de como de representado se siente cada individio con esa emoción o sentimiento.
+
+Para ver como están distribuidas las puntuaciones se grafican estos datos
+```{r}
+g<-list()
+for(i in 1:20){
+  g[[i]]<-ggplot(data1_factor[i])+
+  geom_bar(aes(x=data1_factor[,i]))+
+  xlab(paste("Variable ",colnames(data1_factor[i])))
+  }
+do.call(grid.arrange,g)
+```
+
+
+Como se puede observar la mayoría está en valor 0, y el resto se reparten homogéneamente.
+
+Se van a hacer ahora los test precisos para ver si es oportuno realizar un análisis factorial. En este caso vamos a seleccionar todas las varibales y tenemos un tamaño muestral mayor a 100, siendo las observaciones 10 veces más grande que el número de variables.
+
+Se calcula primero la matriz de correlaciones
+
+```{r}
+correl<-cor(data1)
+corrplot(correl,type = "upper")
+
+```
+
+Se observa que hay algunas variables bastante correlacionadas con otras
+
+```{r}
+#Test de Bartlett
+cortest.bartlett(data1)
+
+#Índice KMO
+KMO(data1)
+
+#determinante de la matriz de correlacion
+det(correl)
+```
+
+Estos tres test nos indican que es adecuado hacer el análisis factorial. El test de Bartlett nos indica que se rechaza la hipótesis nula de de no correlacion entre variables. El indice KMO es bastante alto para todas las varibales, lo que quiere decir que las correlaciones entre ellas son altas. Finalmente el determinante de la matriz de correlación es bajo pero sin llegar a ser 0, lo que indica alta correlacion.
+
+Hacemos un primer análisis con la función fa.parallel
+
+```{r}
+fa.parallel(correl, n.obs = 269, fm = "ml")
+```
+
+Representando el gráfico de autovalor para el criterio de contraste de caida, decidimos extrar 5 factores.
+
+
+```{r}
+#analisis factorial
+ehd.factor <- fa(correl, n.obs = 269, fm = "ml", nfactors = 5, rotate ="varimax")
+
+print(ehd.factor)
+
+print(ehd.factor$loadings,cut=0.45)
+fa.diagram(ehd.factor)
+
+```
+
+Se puede ver que con 5 factores el porcentaje de varianza explicada es un 53% lo cual para estudios en ciencias sociales se considera un nivel razonable (cercano al 60%).
+
+Se observa que no tenemos ningun caso Heywood o ultra-Heywood. La mayoria de las comunalidades (h2) están por encima del 0.4, lo que significa que en la mayoría los factores son capaces de explicar más de un 40% de la varianza de las variables. Hay varios casos en los que las comunalidades que se observan son bajas, por ejemplo en e8, e10 y e16. Se observa que la variable e8 no está correctamente repesentada por ningún factor, por tanto podría eliminarse del análisis de factores y realizar los análisis posteriores con 5 factores + la variable e8. Las otras dos variables que muestran baja comunalidad puede ser debido a que son un poco más ambiguas, como e10 que es gesto preocupado. O e16 que esta relacionada con la anhedonia como otras dos variables del estudio. Mejor conocimiento del campo sería necesario para poder sacar conclusiones más certeras. 
+
+Si se hace un corte de 0.45 en las cargas las variables para cada factor, se puede ver, al igual que en el diagrama, que las variables 8, 16 y 17, tienen una carga muy pequeña en los factores que las representan. 
+
+
+
+En el diagrama se muestra más claramente que variables estan relacionadas unas con otras, las cuales vemos que puntuan bastante en cada uno de los factores (>0.5). También se puede observar como no hay ningún cruce entre variables, aunque en la matriz de loadings se observen más variables puntuando en cada factor, los principales son los que se muestran en la gráfica. 
+
+Así el factor 1 recoge las variables 11, 13, 14, 16 y 17 (ahnedonia oberservada, situacional, indiferencia afectiva, anhedonia sensorial y monotonía afectiva, respectivamente). Por lo tanto el factor 1 podría definirse como indicadores de indiferencia o pérdida de interés que podrían relacionarse con problemás de interacción social y con el entorno.
+
+El factor 2 recoge las variables 4,5 y 6 (monotonia, falta de expresividad espontánea, falta de reaccione afectivas, respectivamente), por tanto el fator 2 podría identificarse como indicadores de falta de expresividad.
+
+El factor 3 recoge las variables 15, 18, 19 y 20 (hipersensibilidad a hechos desagradables, hiper emocionalismo, irritabilidad, humor explosivo, respectivamente). El factor 3 podría relacionarse con la irritabilidad, un estado de ansiedad continuo.
+
+El factor 4 recoge las variables 1, 10 y 12 (tristeza dolorosa, gestos preoupados y tristeza, respectivamente). Las tres variables están relacionadas con el sentimiento de tristeza, que es lo que comumente se identifica más con la depresión.
+
+El factor 5 recoge las variables 2, 3, 7 y 9 (Hiperexpresividad emocional, inestabilidad emocional, incontinencia emocional, humor explosivo). Por tanto estas variables se pueden identificar como personas muy expresivas emocionalmente y que cambian de humor rápidamente.
+
+Se puede observar como la variable 8 (hiperestesia), que es la sensacion exagerada de los estímulos en este caso afectivos, y que no queda efectivamente representada por ningún factor. Se podría intentar sacar más factores para ver si así queda representada, o menos, para ver si se agrupa con otras variables, aun que el análisis en paralelo nos ha proporcionado el valor de 5 como óptimo.
+
+
+
+
+```{r}
+#4factores
+ehd.factor4 <- fa(correl, n.obs = 269, fm = "ml", nfactors = 4, rotate ="varimax")
+print(ehd.factor4$loadings,cut=0.45)
+fa.diagram(ehd.factor4)
+```
+
+Con 4 factores la variable 8 se sigue quedando fuera y se han reagrupadolas 2 y 3 (relacionadas con la hiperexpresividad) en correlacion negativa con 4, 5 y 6 (monotonía) y vemos como la variable 9 tiene poca representación en el grupo en el que se le ha asignado. Estos grupos tienen menos sentido que cuando se realizan 5 factores.
+
+Se prueba con 6 factores
+
+```{r}
+ehd.factor6 <- fa(correl, n.obs = 269, fm = "ml", nfactors = 6, rotate ="varimax")
+print(ehd.factor6$loadings,cut=0.45)
+fa.diagram(ehd.factor6)
+```
+
+Vemos como el 6º factor no tiene ninguna variable asociada, por tanto nos quedamos con los 5 factores y las descripciones de ellos dadas anteriormente.
+
+
+
+## Ejercicio 2
+
+El fichero “socioecconomica.xlsx” contiene información sobre la evolución del paro en la provincia de Cantabria desde el año 2005 hasta el primer trimestre de 2020.
+
+- Seleccione las tasas de paro y evalúe la similitud en la evolución de las series a través de un escalamiento multidimensiónal no métrico.
+
+- Una vez reducida la dimensiónalidad, realice un cluster agrupando las series que presenten comportamientos similares y establezca las conclusiones oportunas.
+
+```{r}
+
+#working directory
+path<-"/home/barbara/Desktop/EvaluacionM4"
+setwd(path)
+
+#lectura de datos
+archivos<-dir(path = path, pattern = "*xlsx", all.files = T,
+    full.names = T)
+
+se <- read_excel(archivos)
+
+#Resumen de los datos
+summary(se)
+
+#Estructura de los datos
+str(se)
+
+#se seleccionan las variables correspondientes a las tasas de paro y también se crea otra para los años.
+se.paro<-t(se[,-c(1,2,17,18)])
+se.year<-se[,-c(1,2,17,18)]
+```
+
+Vamos a ver como se distribuye el paro en los distintos años 
+```{r}
+par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
+time_ser=ts(se[,-c(1,2)],start=c(2005,1),end = c(2020,1))
+plot(time_ser[,1], ylim=c(0, 40),xlab="Año",ylab="paro")
+lines(time_ser[,2],col="red")
+lines(time_ser[,3],col="blue")
+lines(time_ser[,4],col="green")
+lines(time_ser[,5],col="magenta")
+lines(time_ser[,6],col="black",lty=2)
+lines(time_ser[,7],col="red",lty=2)
+lines(time_ser[,8],col="blue",lty=2)
+lines(time_ser[,9],col="green",lty=2)
+lines(time_ser[,10],col="magenta",lty=2)
+lines(time_ser[,11],col="black",lty=3)
+lines(time_ser[,12],col="red",lty=3)
+lines(time_ser[,13],col="blue",lty=3)
+lines(time_ser[,14],col="green",lty=3)
+labelts<-colnames(se[,-c(1,2,17,18)])
+
+ legend("topright", inset=c(-0.35,0), labelts,
+   lty=c(1,1,1,1,1,2,2,2,2,2,3,3,3,3), col=rep(c("black", "red", "blue","green","magenta"),3),cex=0.7)
+grid()
+
+```
+
+
+En esta gráfica podemos ver como el paro juvenil es más alto que el resto, pero para sacar mejores conclusiones tenemos que realizar un análisis de escalamiento multidimensiónal.
+
+Primero vemos que método de distancia nos proporciona un estrés más bajo
+```{r}
+
+s<-vector()
+sy<-vector()
+metodo <- c("manhattan", "euclidean", "bray", "gower")
+for (i in 1:length(metodo)) {
+    print(metodo[i])
+    se.d <- vegdist(se.paro, method = metodo[i])
+    nmds <- mds(se.d,type = "ordinal")
+    s[i]<-nmds$stress
+    print(nmds)
+}
+for (i in 1:length(metodo)) {
+    print(metodo[i])
+    sey.d <- vegdist(se.year, method = metodo[i])
+    nmds <- mds(sey.d,type = "ordinal")
+    sy[i]<-nmds$stress
+}
+
+names(s)<-metodo
+#minimo estres en la base de datos en las series
+s[min(s)==s]
+
+
+names(sy)<-metodo
+#minimo estres en la base de datos por año
+sy[min(sy)==sy]
+label<-vector()
+
+```
+
+
+La distancia euclídea es la que proporciona un stress más bajo, por lo que el resto de análisis se realiza con esta tasa.
+
+```{r}
+#calculo de la distancia y del escalamiento multidimensiónal no métrocp
+se_tasa.d <- proxy::dist(se[,-c(1,2,17,18)], by_rows = FALSE, method = "euclidean")
+nmds_tasa <- mds(se_tasa.d, type = "ordinal")
+nmds_tasa
+summary(nmds_tasa)
+
+```
+
+```{r}
+#grafica escalamiento multidimensiónal
+label=rownames(se.paro)
+ggscatter(as.data.frame(nmds_tasa$conf), x="D1",y="D2",label=label, repel = T)+
+  geom_hline(yintercept=0, linetype="dashed", color = "red")+
+  geom_vline(xintercept=0, linetype="dashed", color = "red")
+
+
+```
+
+```{r}
+#diagrama de sheppard
+plot(nmds_tasa, plot.type = "Shepard")
+```
+
+```{r}
+plot(nmds_tasa, plot.type = "stressplot")
+```
+
+En el diagrama de sheppard vemos como no se aleja de la diagonal. En la siguiente grafica vemos como la proporcion de estrés más alta viene dada pot los datos con más variabilidad.
+
+Una vez hecho el escalamiento multidimensiónal agrupamos los datos en cluster, primero se mira cual es el mínimo de clústers para tener el mínimo error.
+
+```{r}
+K_Max <- 10
+Errores <- NULL
+set.seed(12345)
+
+
+for (i in 1:K_Max){
+    Errores[i] <- sum(kmeans(se.d, centers=i)$withinss)
+    if (i == 1){
+        Errores_max <- Errores[i]
+    }
+    Errores[i] <- Errores[i] / Errores_max
+}
+
+# Gráfico del vector "Errores"
+plot(1:K_Max, Errores, type="b", xlab="Cantidad de Clusters", ylab="Suma de Error",,main="Clusters por tasa de paro")
+```
+
+Vemos que con 2 o 3 cluster la curva ya se estabiliza, intuitivamente podemos ver a partir de la grafica que proporciona el escalamiento multidimensiónal que dos cluster separaria a parados de 16-24 años del resto, vamos a hacer 3 cluster para ver como quedaría.
+
+```{r}
+# Creamos 3 grupos, mediante la función "k-means"
+clust2 <- kmeans(nmds_tasa$conf, 3)$cluster
+palette(rainbow(7))
+
+nmds1<-data.frame(nmds_tasa$conf)
+nmds1$groups=as.factor(clust2)
+label=rownames(se.paro)
+ggscatter(nmds1 ,x = "D1", y = "D2", 
+          label = label,
+          color = "groups",
+          size = 1, 
+          ellipse = TRUE,
+          ellipse.type = "convex",
+          repel = TRUE)+
+  geom_hline(yintercept=0, linetype="dashed", color = "red")+
+  geom_vline(xintercept=0, linetype="dashed", color = "red")
+```
+
+Realizamos también un cluster jerárquico:
+
+```{r}
+hc <- hclust(dist(nmds_tasa$conf), "ave")
+plot(hc,hang = -1)
+
+```
+
+Se puede ver como en ambos cluster se agrupan a los jovenes por un lado, a los hombres y mujeres de mediana edad (25-54) por otro, junto a los no cualificados y por último a los hombres y mujeres mayores de 55.
+
+Por tanto la dimensión 1 representa la edad, y la 2 si es hombre o mujer. En el caso de paro juvenil las diferencias entre mujeres y hombres son notables. El paro juvenil es en media el más alto, pero también el que tiene una distribución más amplia, como se puede ver en el resumen mostrado al principio del ejercicio. Que el paro de los no cualificados se agrupe con el de trabajadores de mediana edad, puede significar que un alto porcentaje de estos son los no cualificados. El total del paro también se agrupa aquí, por lo tanto podríamos deducir que la mayor parte de los parados se distribuyen entre esas edades. 
+
+
+
+
+## Ejercicio 3
+El archivo “coffe.sav” contiene datos relativos a las imágen percibida de seis marcas de café helado. Para cada uno de los 23 atributos de imagen de café helado, los encuestados seleccionaron todas las marcas que quedaban descritas por el atributo. Las seis marcas se denotan AA, BB, CC, DD, EE y FF para mantener la confidencialidad.
+
+Analice la percepción asociada a las diferentes marcas.
+
+
+```{r}
+
+#lectura de datos
+library(haven)
+archivos2<-dir(path = path, pattern = "*sav", all.files = T,
+    full.names = T)
+
+data_coffe<-read.spss(archivos2,to.data.frame=TRUE)
+
+head(data_coffe)
+```
+
+Para trabajar mejor con los datos los convertimos a una base de datos con los atributos como nombres de filas y las marcas de café por columnas
+
+```{r}
+
+coffee<-spread(data=data_coffe,key=marca, value=frec)
+
+coffe_names<-coffee[,1]
+coffee<-coffee[,c(2:ncol(coffee))]
+rownames(coffee)<-coffe_names
+
+#gráfico de contingencia
+dt <- as.table(as.matrix(coffee))
+ggballoonplot(coffee, fill="value")+
+  gradient_fill(c("blue", "white", "red"))+ 
+  ggtitle("Atributos vs Marca de café") +
+  theme(aspect.ratio=1)
+
+```
+
+A primera vista podemos ver como el cafe AA, pricipalmente ha sido votado como popular; BB como sudaustraliano; el café CC como bajo en grasa y sano; DD como bajo en grasa, nuevo y sano; EE como fuerte y para hombres y por ultimo FF como impopular y que engorda.
+
+Para ver la relación entre marcas de café y atributos hacemos un análisis de correspondencias multiples
+
+```{r}
+library("FactoMineR")
+coffee.ca <- CA(coffee, graph = T)
+print(coffee.ca)
+
+```
+
+Mirando los resultados del análisis de correspondencias, se puede observar que el estadistico Chi cuadrado tiene un valor alto y un pvalor de 0, por lo tanto se puede rechazar la hipotesis nula de independencias de las dos variables (marca y atributo). 
+
+En este primer gráfico se puede ver como los cafés CC y DD, así como FF y BB se les identifica con atributos parecidos, respectivamente. Los atributos hombres, duro y trabajando se agupan juntos y cerca de la marca EE. Sano y bajo en grasa aparece en la dimensión 1 a la izquierda, mientras engorda y dulce aparece a la derecha. Por tanto la dimensión 1 podría estar relacionada con lo saludable que es el café. La dimensión 2 sin embargo esta relacionada con la percepción más del sabor, contraponiendo un café fuerte con un café dulce, además de identificar estas con marcas baratas (trabajando= marca para clase trabajadora) en contraposición con superior (marca de gran calidad). También se puede relacionar las marcas más tradicionales con una mayor presencia en la parte derecha del gráfico, con las marcas más nuevas en la parte izquierda. Por tanto, la dimensión uno puede medir también la "novedad" de la marca.
+
+Valores propios
+
+```{r}
+eig.val <- get_eigenvalue(coffee.ca)
+eig.val
+fviz_screeplot(coffee.ca, addlabels = TRUE, ylim = c(0, 50))
+```
+
+Se puede observar que el  82% de la variacíon se explica con las dos primeras dimensiones. Por lo tanto, el análisis se va a centrar en estas.
+
+```{r}
+fviz_ca_biplot(coffee.ca, repel = TRUE)
+```
+
+Mediante los perfiles fila podemos observar que la contribución de cada atributo a cada dimensión. Por ejemplo, el factor engorga tiene más contribución a la dimensión 2 y luego a la 1, para ver esto mejor, se pueden hacer plots de dos en dos dimensiónes.
+
+
+```{r}
+row <- get_ca_row(coffee.ca)
+row$contrib
+fviz_ca_row(coffee.ca,col.row = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),  shape.row = 15, repel = TRUE)
+```
+
+
+
+Se puede ver que casi todas las características estan bien representadas por las dimensiones 1 y 2 excepto "feo", "fresco" y "sudAustraliano". En el siguiente gráfico vamos a ver en que dimensiones están mejor representadas cada una de las variables:
+
+```{r}
+par(mfrow=c(1,2))
+corrplot(row$cos2, is.corr=FALSE, main="calidad de la representación")
+corrplot(row$contrib, is.corr=FALSE, main="contribuciones")
+```
+
+
+Vemos como SudAustraliano está bien representado en la dimensión 3, junto con un poco de representación de "feo" y "fresco", pero no tienen mucha importancia, en la dimensión. "fresco" y "feo" están representadas en la dimensión 4 pero tampoco tienen mucha importancia. 
+
+Con respecto a las contribuciones de cada una de las características a las dimensiones, la dimensión 1 se caracteriza sobre todo por "bajo en grasa" y "sano", la dimensión 2 por "hombres" y "duro", la 3 por "sudaustraliano" y "dulce", la 4 por "tradicional" y la 5 por "nuevo" y "secundario". Estas relaciones se pueden ver mejor en los siguientes gráficos.
+
+
+```{r}
+fviz_contrib(coffee.ca, choice = "row", axes = 1, top = 10)
+fviz_contrib(coffee.ca, choice = "row", axes = 2, top = 10)
+fviz_contrib(coffee.ca, choice = "row", axes = 3, top = 10)
+fviz_contrib(coffee.ca, choice = "row", axes = 4, top = 10)
+fviz_contrib(coffee.ca, choice = "row", axes = 5, top = 10)
+```
+
+
+
+
+Las contribuciones relativas y totales a cada una de las dimensiones por parte de las marcas se pueden ver gráficamente a continuación:
+
+```{r}
+col <- get_ca_col(coffee.ca)
+par(mfrow=c(2,2))
+corrplot(col$cos2, is.corr=FALSE,main="calidad de la representación")
+corrplot(col$contrib, is.corr=FALSE,main="contribuciones")
+
+```
+
+Podemos ver como las marcas AA, CC y DD están mejor representadas por la dimensión 1. 
+
+Con los gráficos anteriores y estos se pueden relacionar marcas con atributos, así las marcas mejor representadas con la dimensión 1 se relacionan con los atributos mejor representados por la misma.
+
+Para ver las relaciones entre variables se realiza un biplot simértrico para comparar las categorias de ambas variables.
+
+```{r}
+fviz_ca_biplot(coffee.ca, 
+               map ="symbiplot", arrow = c(TRUE, TRUE),
+               repel = TRUE)
+```
+
+
+Las contribuciones a estas dos dimensiones también se pueden ver a través de la función dimdesc
+
+
+```{r}
+coffee.desc <- dimdesc(coffee.ca, axes = c(1,2))
+#Descripcion de la dimensión 1
+coffee.desc[[1]]$row
+coffee.desc[[1]]$col
+#descripcion de la dimensión 2
+coffee.desc[[2]]$row
+coffee.desc[[2]]$col
+```
+
+
+En este gráfico y en las puntuaciones anteriores se puede ver como CC y DD se agrupan juntos y junto a las características sano, bajo en grasa, nuevo, mujeres, atractivo. Por lo que estas marcas serán marcas nuevas que publicitan cafés más sanos, bajos en grasas, con un diseño más atractivo para ataer al público femenino, también se identifican como marcas secuandarias, menos compradas. La marca EE se situa cerca de marcas que se identifican como para clase trabajadora, café fuerte, posiblemente barata, en el mismo cuadrante de la dimensión 1 que se identifica con marcas tradicionales y populares, que se ha orientado al público masculino. La marca AA se identifica sobre todo con una marca popular y se encuentra también cerca de la característica tradicional, por lo que será la marca de café más antigua y más comprada. Por último FF y BB se identifican con características como calidad superior, dulce, niños y en menor medida (ya que se ha visto que este atributo no está bien representado en estas dos dimensiónes) sudaustraliano. Por tanto estas dos marcas se identifican con marcas más especiales, más dulces pero también tradicionales. En los gráficos de correlaciones se puede ver que sudaustraliano esta mejor representado en la dimensión 3, al igual que la marca BB está mejor representada en esa dimensión, por tanto podría ser una marca de café sudasutraliana. 
+
+Por último, con los datos de las caracteristicas podríamos hacer un análisis cluster para ver como se agrupan las caracteristicas
+
+
+
+```{r}
+set.seed(123)
+ 
+# Crea vector "Errores", sin datos
+# Crea variable "K_Max" con la cant. maxima de k a analizar
+Errores <-NULL
+K_Max   <-15
+ 
+
+# Ejecuta kmeans con diferentes cluster, desde 1 hasta 10
+# Luego guarda el error de cada ejecucion en el vector "Errores"
+for (i in 1:K_Max)
+  {
+  Errores[i] <- sum(kmeans(row$coord, centers=i)$withinss)
+  }
+# Grafica el vector "Errores"
+plot(1:K_Max, Errores, type="b", 
+              xlab="Cantidad de Cluster", 
+              ylab="Suma de error")
+
+clust <- kmeans(row$coord, 4)$cluster
+palette(rainbow(7))
+# plot(nmds2$conf, type = "n", xlab = "Dimensión 1", ylab = "Dimensión 2")
+# text(nmds2$conf, labels = label, cex = 0.6, col = clust)
+# abline(h = 0, lty = 3)
+# abline(v = 0, lty = 3)
+col <- get_ca_col(coffee.ca)
+coldf<-data.frame(col$coord)
+rowdf<-data.frame(row$coord)
+rowdf$groups=as.factor(clust)
+label=rownames(coffee)
+ggscatter(rowdf ,x = "Dim.1", y = "Dim.2", 
+          label = label,
+          color = "groups",
+          size = 1, 
+          ellipse = TRUE,
+          ellipse.type = "convex",
+          repel = TRUE)
+
+```
+
+Se observa como más o menos se corresponden los grupos con las marcas de café.
+
+
+#### Escalamiento multidimensiónal
+
+Con el escalamiento multidimensiónal no podremos analizar conjuntamente filas y columnas, pero podremos agrupar mejor los grupos de caracteristicas:
+```{r}
+
+metodo <- c("manhattan", "euclidean", "bray", "gower")
+for (i in 1:length(metodo)) {
+    coffee.d <- vegdist(coffee, method = metodo[i])
+    nmds_c <- mds(coffee.d,type = "ordinal")
+    s[i]<-nmds_c$stress
+}
+names(s)<-metodo
+s[min(s)==s]
+```
+```{r}
+ coffee.d <- vegdist(coffee, method = "manhattan")
+    nmds_c <- mds(coffee.d,type = "ordinal")
+    summary(nmds_c)
+    ggscatter(as.data.frame(nmds_c$conf), x="D1",y="D2",label=label, repel = T)+
+  geom_hline(yintercept=0, linetype="dashed", color = "red")+
+  geom_vline(xintercept=0, linetype="dashed", color = "red")
+```
+
+Se puede observar como el reparto de las caracteristicas, aunque rotado, es el mismo que en el análisis de correspondencias, por tanto vamos a seguir con el anális para hacer un análisis cluster. Primero vemos el minimo de clusters para que el error sea también mínimo. 
+```{r}
+set.seed(123)
+ 
+# Crea vector "Errores", sin datos
+# Crea variable "K_Max" con la cant. maxima de k a analizar
+Errores <-NULL
+K_Max   <-15
+ 
+
+# Ejecuta kmeans con diferentes cluster, desde 1 hasta 10
+# Luego guarda el error de cada ejecucion en el vector "Errores"
+for (i in 1:K_Max)
+  {
+  Errores[i] <- sum(kmeans(nmds_c$conf, centers=i)$withinss)
+  }
+# Grafica el vector "Errores"
+plot(1:K_Max, Errores, type="b", 
+              xlab="Cantidad de Cluster", 
+              ylab="Suma de error")
+```
+
+El análisis de errores nos indica 6 cluster, pero como tenemos 6 marcas y estan agrupadas en 4, vamos a hacer 4 cluster
+```{r}
+#Hacemos 6 clusters
+clust <- kmeans(nmds_c$conf, 4)$cluster
+palette(rainbow(7))
+# plot(nmds2$conf, type = "n", xlab = "Dimensión 1", ylab = "Dimensión 2")
+# text(nmds2$conf, labels = label, cex = 0.6, col = clust)
+# abline(h = 0, lty = 3)
+# abline(v = 0, lty = 3)
+
+df<-data.frame(nmds_c$conf)
+df$groups=as.factor(clust)
+label=rownames(coffee)
+ggscatter(df ,x = "D1", y = "D2", 
+          label = label,
+          color = "groups",
+          size = 1, 
+          ellipse = TRUE,
+          ellipse.type = "convex",
+          repel = TRUE)
+```
+
+Vemos como se pueden identificar todas las marcas menos la AA, con los cluster que aparecen en el análsis. Este análsisi es equivalente a hacer kmeans con los datos de el análisis de correspondencias por filas, pero aquí los errores se reducen al utilizar un método que reduce la dimensiónalidad pero preservando las distancias, que es lo optimo para utilizar un método de agrupamiento por cluster.
+
+## Ejercicio 4 
+
+La base de datos Cars93 incluida en la librería “MASS” contiene una selección aleatoria de 93 modelos de automóviles de pasajeros de 1993 que se enumeraron tanto en la edición de Consumer Reports como en la Guía de compras de PACE. Las camionetas y los vehículos deportivos / utilitarios fueron eliminados debido a la información incompleta en la fuente de Consumer Reports. Los modelos duplicados (por ejemplo, Dodge Shadow y Plymouth Sundance) se enumeraron como máximo una vez.
+
+Plantee un análisis de correlación canónica entre las variables asociadas a las características físicas de los vehículos (tamaño de motor, caballos de fuerza, longitud, distancia entre ejes, anchura, asiento trasero y peso) y las relativas al precio y el funcionamiento (precio medio, consumo en ciudad, consumo en carretera y espacio de giro en U).
+
+Importar los datos:
+
+```{r}
+ data(Cars93)
+ coches93<-Cars93
+#Estructura y resumen
+str(coches93)
+summary(coches93)
+```
+
+Se observa que hay dos NA en `Rear.seat.room` y  en `Lugagge.room`
+```{r}
+coches93[(unique (unlist (lapply (coches93, function (x) which (is.na (x)))))),]
+```
+
+
+```{r}
+## MISSINGS
+#Busco si existe algún patrón en los missings, que me pueda ayudar a entenderlos
+corrplot(cor(is.na(coches93[colnames(coches93)[colSums(is.na(coches93))>0]])),
+         method = "circle",type = "upper") #No se aprecia ningún patrón
+#eliminamos los na
+
+coches93_clean<-na.omit(coches93)
+#Busco si existe algún patrón en los missings, que me pueda ayudar a entenderlos
+which(is.na(coches93_clean)==T)
+```
+
+Como se observa, solo hay missing en las variables `rear.seat.room` y `luggage.room`, y en los coches de tipo `sporty`y `van`, que son los que se indica en el enunciado que se han eliminado. Pueder ser un error en la base de datos. En el análisis se borraran los datos de NA. De las características que se analizan solo se utiliza `rear.seat.room`, por lo tento solo dos hay dos valores missing en el análisis.
+
+Para hacer el análisis separamos las variables en dos matrices X e Y, siendo la X la correspondiente al precio y al funcionamiento y la matriz Y con las características físicas.
+
+```{r}
+Xc <- as.matrix(coches93_clean[,c("Price", "MPG.city", "MPG.highway", "Turn.circle")])
+rownames(Xc) <- coches93_clean[,2]
+Yc <- as.matrix(coches93_clean[, c("EngineSize", "Horsepower", "Length", "Wheelbase", "Width", "Rear.seat.room", "Weight")])
+rownames(Yc) <- coches93_clean[,2]
+```
+
+Para observar como se relacionan entre las matrices pintamos los gráficos de correlación entre ellas.
+
+```{r}
+
+
+correlc <- matcor(Xc, Yc)
+img.matcor(correlc, type = 2)
+```
+
+En general se observa alta correlación, tanto negativa como positiva dentro de cada una de las matrices y entre ellas. Como estas correlaciones son altas podemos seguir con el análisis.
+
+```{r}
+cochesc.cc<-cc(Xc,Yc)
+cochesc.cc
+```
+
+De la salida del análisis nos fijamos en las correlaciones. Tenemos 4 dimensiones. Con respecto a las caracteristicas relativas al precio y al funcionamiento, se observa que tanto el precio como el espacio de giro en U tienen correlaciones negativas con respecto al consumo. Es decir a más precio, menos millas por galon recorre. En la dimensión 2 sin embargo, el consumo tiene poca importancia y separa el precio del espacio de giro en U, por lo que estas dos variables estarán inversamente relacionadas.
+
+```{r}
+plt.cc(cochesc.cc, var.label = TRUE)
+```
+```{r}
+plt.cc(cochesc.cc, var.label = TRUE,type="v")
+plt.cc(cochesc.cc, var.label = TRUE,type="i")
+```
+
+
+Estas dos dimensiones no dan mucha información acerca de las características físicas, solamente que la dimensión 1 acumula a la izquierda todas las características y que los coches con un alto precio también tendran una potencia más alta. Y los coches con mayor ancho y largo tendrán un espacio de giro más amplio. Por tanto el modelo 300E será el modelo más caro y tendra una potencia alta y un consumo también alto (menos millas por galón recorridas), mientas que los modelos que esten más a la derecha tendrán un consumo más bajo (más millas por galón). En este caso todas las características físicas se relacionan direactamente con el consumo, lo que quiere decir que a más características, es decir coche más grande, más pesado, con más espacio en los asientos, el coche consume más (menos millas por galón). En resumen, los coches situados en el cuadrante superior izquierdo, serán coches con un precio más alto, un mayor consumo de gasolina, mayor potencia, menos distancia de giro en U; los coches situados en el cuadrante inferior izquierdo tendrán un precio más bajo, alto consumo en gasolina y un espacio de giro en U más amplio; por otro lado en los cuadrantes de la derecha los modelos se concentran más en el centro de la dimensión 2, por lo que tendrán un precio medio, y se sitúan en la zona de consumo bajo (más millas por galón).
+
+
+Para ver las relaciones con las otras dimensiones vamos a mostrar otra vez las matrices de correlación y los gráficos con otras variables
+
+```{r}
+cochesc.cc$scores[3:6]
+plt.cc(cochesc.cc, d1=1, d2=3, var.label = TRUE)
+plt.cc(cochesc.cc, d1=1, d2=4, var.label = TRUE)
+plt.cc(cochesc.cc, d1=2, d2=3, var.label = TRUE)
+plt.cc(cochesc.cc, d1=2, d2=4, var.label = TRUE)
+plt.cc(cochesc.cc, d1=3, d2=4, var.label = TRUE)
+```
+
+
+No se observan aportaciones imporantes de las otras dimensiones al análisis, salvo identiifcar mejor algunos modelos con bajos consumos como el civic, metro, Lemans que tienen un precio más bajo. 
+
+
+
+
+

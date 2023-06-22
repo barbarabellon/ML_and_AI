@@ -1,0 +1,1003 @@
+---
+title: "Evaluación Módulo 2"
+author: "Bárbara Bellón Lara"
+date: "31/03/2020"
+output: 
+    html_document:
+      highlight: tango
+      theme: simplex
+      toc: true
+      toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(warn = -1) 
+```
+
+## Cargar paquetes
+
+```{r message=FALSE}
+library(rmarkdown)
+library(tidyverse)
+library(ggplot2)
+library(data.table)
+library(readxl)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(ISOweek)
+require(scales)
+library(gtable)
+```
+
+
+## Leer el archivo
+
+```{r}
+df <- read_excel("Online+Retail.xlsx")
+```
+
+Vemos la estructura y la cabecera del archivo
+```{r eval=FALSE}
+head(df)
+```
+
+Cabecera base de datos
+```{r echo=FALSE}
+knitr::kable(
+  head(df)
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+```
+
+
+```{r}
+#Estructura de la base de datos
+str(df)
+```
+
+
+## Exploración y limpieza de datos
+
+Se puede observar que la misma factura `InvoiceNo` tiene varios items. También se observa que no hay un total de la compra, por lo que se puede agrupar los datos por `InvoiceNo` y hacer un total de la compra de cada factura. Las descripciones de los archivos, los países y el identificador del país se van a convertir a factores para poder trabajar mejor con ellos. En el caso del tiempo vemos que el formato ya esta bien definido, por tanto con usar la función `difftime` entre dos variables nos daría la diferencia en tiempo entre compras.
+
+Se calcula el total de compra por articulo
+
+```{r}
+df$TotalPrice <- df$UnitPrice * df$Quantity
+```
+También se van a separar los datos de tiempo en mes, dia y hora
+
+```{r}
+df$Mes <- month.abb[month(df$InvoiceDate)]
+df$Year <- year(df$InvoiceDate)
+df$Dia_mes <- mday(df$InvoiceDate)
+df$Dia_año <- yday(df$InvoiceDate)
+df$Dia_sem <- weekdays(df$InvoiceDate, abbreviate = TRUE)
+df$hora <- hour(df$InvoiceDate)
+df$min <- minute(df$InvoiceDate)
+
+```
+
+
+Hacemos un resumen de los resultados para ver a que nos enfrentamos. Vemos que la cantidad media es de 9.55 productos, este valor en este caso no tiene mucho sentido analizarlo porque no es por factura sino por producto dentro de cada factura. También se observa que el mínimo de cantidad es negativo e igual que el máximo, por lo que habrá operaciones que serán de devolución. En el precio unitario también vemos valores negativos que no se qué significan
+```{r eval=FALSE}
+df %>% 
+  select(Quantity, UnitPrice) %>% 
+  summary(df)
+```
+
+
+```{r echo=FALSE}
+knitr::kable(
+  df %>% select(Quantity,UnitPrice)%>% summary(df),
+  caption = "Estadísticas para cantidad y precio unitario"
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+```
+
+Para un primer análisis de los datos categóricos se miran los niveles que tienen cada uno
+
+```{r}
+levels( as.factor( df$Country ) )
+```
+
+```{r}
+length(levels(as.factor(df$InvoiceNo)))
+```
+
+
+```{r}
+length(levels(as.factor(df$CustomerID)))
+```
+
+
+```{r}
+length(levels(as.factor(df$StockCode)))
+length(levels(as.factor(df$Description)))
+```
+
+
+
+
+
+Ahora podemos ver que hay 38 paises distintos, uno de los cuales aparece como Unespecified y otro como European Comunity (que serán tratados como paises indepedientes), 25900 facturas, 4371 clientes distintos identificados y otro gran grupo de clientes que aparece como NA. Por último hay un mayor número de descripciones de objetos que de códigos de stock, más tarde se analizará esta cuestión.
+
+En el resumen de la base de datos se ven productos con cantidades negativas y con precio negativo.
+
+Productos con precio negativo
+```{r eval=FALSE}
+df[which(df$UnitPrice < 0),]
+
+```
+```{r echo=FALSE}
+paged_table(df[which(df$UnitPrice < 0),])
+```
+
+Productos con cantidades negativas
+```{r eval=FALSE}
+df[which(df$Quantity < 0),]
+```
+
+
+```{r echo=FALSE}
+paged_table(df[which(df$Quantity<0),])
+```
+
+Solo hay dos productos así cuya descripción es "Adjust bad debt" y el código de estock es B
+
+```{r eval=FALSE}
+df[which(df$StockCode == "B"),]
+df[which(df$Description == "Adjust bad debt"),]
+```
+
+```{r echo=FALSE}
+paged_table(df[which(df$StockCode=="B"),])
+paged_table(df[which(df$Description =="Adjust bad debt"),])
+```
+
+Podríamos considerar estos valores como negativos como errores y devoluciones que no sabemos muy bien su origen, por lo tanto creamos una variable con ellos que sea devolución o no, y con ellos podemos trabajar luego. 
+
+```{r}
+df_clean <- df[df$Quantity > 0 & df$UnitPrice > 0,]
+
+knitr::kable(
+  summary(df_clean),
+  caption = "Resumen estadistico de la base de datos sin los productos con precio negativo y cantidad negativa"
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+
+```
+
+
+
+Se va a comprobar si hay otros códigos aparte de las C que signifique otro tipo de transacciones
+
+```{r}
+df$Invoicecode <- ifelse(!grepl("\\D", df$InvoiceNo),"venta","otro")
+paged_table(
+head(df[df$Invoicecode != "venta",] %>% arrange(desc(InvoiceNo))))
+paged_table(
+head(df[df$Invoicecode != "venta",] %>% arrange(InvoiceNo)))
+```
+
+
+
+Explorando en la descripción del objeto y el código de stock parecen tener alguna relación. Se agurpan los datos por codigo de stock y por descripción.
+
+```{r eval=FALSE}
+df %>% 
+  group_by(StockCode,Description) %>% 
+  summarise(cuenta = n(), cantidad = mean(Quantity), precio = mean(UnitPrice))
+```
+```{r echo=FALSE}
+paged_table(df %>% group_by(StockCode,Description) %>% summarise(cuenta=n(), cantidad=mean(Quantity)))
+```
+
+Muchos de los códigos con descripción NA, ?, damages u otros códigos de error tienen cantidades negativas y precios 0. Podemos considerar estas cantidades como errores de compra o devoluaciones por lo que no las tenemos en cuenta, ya que como se ha dicho antes no se sabe muy bien la procedencia de dichos errores.
+
+
+Tabla agrupando por StockCode y Description en la base de datos limpia
+
+```{r}
+paged_table(
+  df_clean %>%
+    group_by(StockCode,Description) %>%
+    summarise(cuenta = n(), cantidad = mean(Quantity), valor = sum(TotalPrice)) %>%
+    arrange(desc(StockCode))
+  )
+```
+
+
+
+Se observan otros códigos como Samples, Postage, Manual, carriage o bank charges. Estos Códigos tambien se corresponden con la descripción que pueden indicar en postage o carriage los gastos de envío, el cargo del banco podría ser las comisiones cobradas por ciertos bancos dependiendo de la transacción, etc. Por tanto una vez eliminados los registros negativos la relación entre descripción y código de stock parece ser univoca. A partir de ahora se va a utilizar la base de datos limpia sin tener en cuenta los valores negativos de compras.
+
+
+
+¿Cuantos productos con Descripcion NA hay en la base de datos limpia? ¿y con cliente NA?
+```{r}
+sum(is.na(df_clean$Description))
+sum(is.na(df_clean$CustomerID))
+```
+
+Ahora no tenemos ninguna descripción con NA. Pero seguimos teniendo muchos clientes sin identificar, sin embargo no sería correcto no analizar estas comprar porque suponen un gran porcentaje de las transacciones.
+
+
+
+```{r}
+
+df_clean2<-df_clean[!is.na(df_clean$CustomerID),]
+
+df_na<-df_clean[is.na(df_clean$CustomerID),]
+```
+
+
+Se filtran los clientes por identificados y sin identificar
+```{r}
+df$Cliente <- ifelse(is.na(df$CustomerID), "SinID", "ID")
+df_clean$Cliente <- ifelse(is.na(df_clean$CustomerID), "SinID", "ID")
+rm(df_clean2, df_na)
+```
+
+Tenemos dos bases de datos, una `clean` sin los datos "erróneos" y otra con las variables creadas para poder filtrar estos.
+
+
+```{r}
+#Conversion a data-table
+df_clean_dt <- data.table(df_clean)
+df_dt <- data.table(df)
+```
+
+
+
+
+Se puede observar como el porcentaje total de compras de los clientes no identificados es de más de un 16% por tanto no se debe despreciar. 
+
+
+```{r}
+#Se crean dos bases de datos, una para los clientes con ID y otra para los sin ID
+df_clean_custID<-filter(df_clean_dt, df_clean_dt$Cliente == "ID")
+df_clean_cust_noID<-filter(df_clean_dt, df_clean_dt$Cliente != "ID")
+
+#Se calcula el total de las compras 
+TotalID <- sum(df_clean_custID$TotalPrice)
+TotalnoID <- sum(df_clean_cust_noID$TotalPrice)
+
+#Se crea un dataframe para graficar los resultados
+data1 <-data.frame(id=c("ID","Desconocido"),value=c(TotalID,TotalnoID))
+
+data1 <- data1 %>% 
+  arrange(desc(id)) %>%
+  mutate(prop = value / sum(data1$value) *100) #Calculo de porcentajes
+
+ggplot(data1, aes(x="", y=value, fill=id)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0)+
+  theme_void() +
+  geom_text(aes(y=c(2.5e6,1e7), label = paste(round(prop),"%")), color = "black", size=4) +
+  scale_fill_brewer(palette="Set1") +
+  ggtitle("Porcentaje Compras Clientes Identificados/no identificados")
+
+```
+
+
+
+
+
+## Compras en el tiempo
+
+En esta tabla se representan las compras por mes y año, mostrando el numero de transacciones, el valor de las compras medias y el total de compras por mes y año.
+```{r}
+paged_table(
+df_clean %>%
+  group_by(Mes,Year) %>% 
+  summarise(cuenta=n(), mediaticket=mean(TotalPrice),ticketTotal=sum(TotalPrice)) %>% 
+  arrange(ticketTotal)
+)
+```
+
+#### Compras por mes
+
+```{r}
+#Colocar meses
+df_clean <- df_clean %>% 
+  mutate(Mes = fct_relevel(Mes, "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"))
+
+#Crear una variable que una mes y año
+df_clean <- df_clean %>% 
+  mutate(MY = paste(Mes,Year))
+
+#Colocar meses
+df_clean <- df_clean %>% 
+  mutate(MY = fct_relevel(MY, "Dec 2010","Jan 2011","Feb 2011","Mar 2011","Apr 2011","May 2011","Jun 2011","Jul 2011","Aug 2011","Sep 2011","Oct 2011","Nov 2011","Dec 2011"))
+
+#Calulo de las ventas totales por mes
+calculo_por_mes <- df_clean %>% 
+  group_by(MY) %>% 
+  summarise(total=sum(TotalPrice))
+
+ggplot(calculo_por_mes, aes(x = MY, y = total)) +
+  geom_bar(stat = "identity",  position="dodge") +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+Eso son las compras totales que se observa que son mas altas en el mes de Noviembre, pero ¿y las compras medias? ¿se compran mas articulos o articulos de mas valor?
+
+#### Ordenes y ticket medio por mes
+```{r}
+#Agrupar por numero de factura y calcular el total de GPB, el total de articulos
+df_clean2 <- df_clean %>% 
+  group_by(InvoiceNo) %>% 
+  distinct() %>%
+  mutate(ticket = sum(TotalPrice), items_por_ticket = sum(Quantity), cuenta = n()) %>% 
+  arrange(desc(ticket)) 
+
+#Agrupar por año y calcular el ticket medio por mes, utilizando el ticket medio por factura anterior
+calculo_por_mes <- df_clean2 %>% 
+  group_by(MY) %>% 
+  summarise(ticketmedio = mean(ticket), cantidad = mean(items_por_ticket), cuenta = n())
+
+knitr::kable(summary(calculo_por_mes)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+
+
+ggplot(calculo_por_mes, aes(x = MY)) +
+  geom_bar(aes(y = ticketmedio, colour = "Ticket medio"), stat = "identity") +
+  geom_point(aes(y = cuenta /35, colour = "Órdenes")) +
+  scale_y_continuous(limits = c(0, 3000),sec.axis = sec_axis(trans = ~ . *35, name = "Órdenes por mes")) + 
+  scale_colour_manual(values = c("red","blue")) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  xlab("Mes") +
+  ylab("Valor medio de cada orden")
+```
+
+Las compras medias en diciembre son de más precio, sin embargo el total de compras es más pequeño. Se puede observar la diferencia en los gráficos y en el resumen. El valor máximo de compra total, es en el mes de noviembre, un gasto medio de cada orden más pequeño, pero más ordenes por mes. La media por ticket es de 1343,6 GPB. Asumimos que la moneda es la local de la empresa.
+
+
+
+#### Ordenes y ticket medio por día
+
+```{r}
+#Calculo del ticket medio por dia de la semana
+calculo_por_dia <- df_clean2 %>% 
+  group_by(Dia_sem) %>%
+  distinct()%>%
+  summarise(Ticket = mean(ticket), cantidad = sum(Quantity), cuenta = n()) %>% 
+  arrange(Dia_sem)
+
+paged_table(calculo_por_dia)
+
+ggplot(calculo_por_dia, aes(x = Dia_sem)) +
+  geom_bar(aes(y = Ticket, colour = "Ticket medio"),stat = "identity") +
+  geom_point(aes(y = cuenta/55, colour = "Órdenes")) +
+  scale_y_continuous(sec.axis = sec_axis(trans = ~ . *55, name = "Órdenes por día")) + 
+  scale_colour_manual(values = c("red","blue")) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_x_discrete(limits = c("lun","mar", "mié", "jue", "vie", "sab","dom")) +  
+  xlab("Día de la semana") +
+  ylab("Valor medio de cada orden")
+
+
+  
+```
+
+Los martes y los jueves hay mas compras que los lunes, miércoles y viernes. El día que menos compras hay es el domingo y el sábado no aparaece ninguna compra. El gasto mas alto en compras se hace los lunes y los vuernes.
+
+#### Compras totales por mes agrupadas en días
+
+Se calculan las compras por mes y día de la semana, para ver si hay diferencias entre los dias de la semana en los diferentes meses
+```{r}
+
+calculo_por_mesdia <- df_clean2 %>% 
+  group_by(MY,Dia_sem) %>%
+  summarise(totalTicket = sum(TotalPrice)) %>%
+  mutate(Dia_sem = fct_relevel(Dia_sem, "lun","mar", "mié", "jue", "vie", "sab","dom")) 
+
+paged_table(calculo_por_mesdia)
+
+ggplot(calculo_por_mesdia, aes(x = MY, y = totalTicket, fill = Dia_sem, order = Dia_sem)) +
+  geom_bar(stat = "identity",  position = "dodge") +
+  ylab("Compras en GPB")+
+  theme(axis.text.x = element_text(angle = 90))
+  
+```
+
+En diciembre de 2011 las compras más altas se realizan los viernes, mientras que en el resto de meses, exceptuando noviembre las compras más altas varian entre martes y jueves.
+
+Otra manera de verlo serían las compras totales por día, separadas por meses.
+
+```{r}
+
+ggplot(calculo_por_mesdia, aes(x = Dia_sem, y = totalTicket, fill = MY)) +
+  geom_bar(stat = "identity",  position = "dodge") +
+  scale_fill_discrete(name = "Mes") +
+  xlab("Día de la semana") +
+  ylab("Compras en GPB")
+```
+
+#### Calculo dia mes
+
+Se calculan las compras agrupadas por mes y día del mes. Para ver si se observan mas compras a principios, finales o mediados de mes.
+```{r}
+
+calculo_por_diames <- df_clean %>%
+  group_by(MY, Dia_mes) %>%
+  summarise(totalTicket = sum(TotalPrice))
+
+ggplot(calculo_por_diames, aes(x = Dia_mes, y = totalTicket)) +
+  geom_bar(stat = "identity",  position = "dodge") +
+  facet_wrap(~MY) +
+  ylab("Compras totales GPB") +
+  xlab("Día del mes") +
+  theme(axis.text.x = element_text(angle = 90))
+  
+```
+
+Las compras se distribuyen de manera homogénea a lo largo de los meses, menos en diciembre 2011 donde se ve un incremento con un pico antes del dia 10, los datos se cortan ahí, puede que sea el ultimo momento en el que la base de datos se ha actualizado. 
+
+#### Compras por hora
+
+Se calculan las compras por hora
+
+```{r}
+
+calculo_por_hora <- df_clean2 %>% 
+  group_by(hora) %>% 
+  summarise(articulos_vendidos = sum(Quantity), cuenta = n(), facturacion = sum(TotalPrice))
+
+knitr::kable(summary(calculo_por_hora)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+
+ggplot(calculo_por_hora, aes(x = hora)) +
+  geom_bar(aes(y = cuenta), stat = "identity") +
+  geom_line(aes(y = cumsum(facturacion) / 130), col = "red") +
+  scale_y_continuous(sec.axis = sec_axis(trans = ~ . *130, name = "Facturación Acumulada")) + 
+  scale_x_continuous(breaks = c(6:20)) +
+  ylab("Ordenes por hora") 
+  
+```
+
+Las compras se concentran entre las 12 y las 15 del medio día.  
+
+```{r}
+calculo_por_hora <- df_clean %>% 
+  group_by(hora,Dia_sem) %>% 
+  summarise(articulos_vendidos = sum(Quantity), cuenta = n())
+
+ggplot(calculo_por_hora, aes(x = hora, y = cuenta)) +
+  geom_bar(stat = "identity",  position="dodge") +
+  facet_wrap(~Dia_sem) + 
+  ylab("Órdenes")
+```
+
+A lo largo de la semana las compras están más o menos concentradas en las horas centrales del día.
+
+#### Differencia de tiempo entre compras de clientes
+
+
+Un valor muy interesante puede ser el ver cada cuanto compran los clientes, si esas compras son estables a lo largo del tiempo, y si estos clientes compran solo una vez o más y cada cuanto compran. 
+```{r eval=TRUE, results="hide"}
+#Fecha de referencia la ultima de compra
+df_clean_dt[, ref_date_g := max(InvoiceDate)]
+
+#diferencia entre compras es la diferencia entre cada compra y la fecha de referencia
+df_clean_dt[, dif_time_g := difftime(ref_date_g, InvoiceDate, units = "days")][order(dif_time_g)]
+
+#marcar una fecha de referencia que es la ultima fecha de compra del cliente, 
+#ese sería el día 0, todas las demas compras son hechas anteriormente
+df_clean_dt[, ref_date := max(InvoiceDate), by = "CustomerID"]
+
+#Se calcula la diferencia de tiempo entre el tiempo de referencia y el resto de compras por cliente
+df_clean_dt[, dif_time := difftime(ref_date, InvoiceDate, units = "days"), by = "CustomerID"]
+
+#Se calcula la media de tiempo entre ordenes por cliente
+df_clean_dt[, mean_time := mean(dif_time), by = "CustomerID"][order(CustomerID, -mean_time)]
+```
+
+
+```{r echo=FALSE}
+paged_table(
+  df_clean_dt[, mean_time := mean(dif_time), by = "CustomerID"][order(CustomerID, -mean_time)]
+  )
+```
+
+```{r}
+#se filtran los clientes sin identificar
+t_medio_cliente <- df_clean_dt %>%
+  filter(Cliente=="ID") %>%
+  group_by(InvoiceNo) %>% #Se agrupa por Factura (y por tanto por cliente)
+  distinct() %>% #Se escogen solo los registros unicos para no duplicar el numero de compras. 
+  select(CustomerID,mean_time,dif_time,dif_time_g, TotalPrice, Quantity) %>%
+  summarise(t_medio = mean(dif_time),t_mediog = mean(dif_time_g), compra_total = sum(TotalPrice), count = n()) %>% 
+  arrange(desc(count)) 
+
+ggplot(t_medio_cliente, aes(x = t_medio)) +
+  geom_histogram(position = "identity",color = "black", fill = "white",binwidth = 1) +
+  theme(legend.position = "top") + 
+  scale_color_grey() +
+  scale_fill_grey() +
+  xlab("Tiempo en días") +
+  ggtitle("Distribución de compras en el tiempo desde la ultima compra por cliente")
+
+```
+
+Se elimina el 0 para poder ver mejor la forma del histograma
+```{r}
+
+ggplot(t_medio_cliente, aes(x = t_medio)) +
+  geom_histogram(position = "identity",color = "black", fill = "white",binwidth = 2) +
+  theme(legend.position = "top") + 
+  scale_color_grey() +
+  scale_fill_grey() +
+  xlab("Tiempo en días") +
+  xlim(0.5,360)+
+  ggtitle("Distribución de compras en el tiempo desde la ultima compra por cliente")
+```
+
+El tiempo medio de compra por clientes mas alto es de 0, lo cual quiere decir que la mayor parte de los clientes solo ha comprado una vez. Eliminando el 0 se ve que hay picos de compras cada 15 días. El tiempo medio entre compras general varía como hemos visto. También se observa  un aumento en las compras recientes. Esto está calculado para cada cliente individualmente, por lo que no indica que en los ultimos meses haya habido más compras, sino que hay muchos clientes que compran pocas veces.
+
+
+
+Se muestran a continuación las tablas donde se muestran el tiempo medio entre compras por cliente y factura.
+```{r}
+
+paged_table(t_medio_cliente)
+knitr::kable(summary(t_medio_cliente),caption = "Resumen estadistico del tiempo medio entre compras") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+
+```
+
+
+###### Clientes que más compras han hecho
+```{r}
+
+#cliente que mas compra
+cliente_mas_c <- t_medio_cliente <- df_clean_dt %>%
+  filter(Cliente=="ID") %>%
+  group_by(CustomerID) %>% 
+  distinct() %>% #Se escogen solo los registros unicos para no duplicar el numero de compras. 
+  select(CustomerID,mean_time,dif_time, TotalPrice, Quantity) %>%
+  summarise(t_medio = mean(dif_time), compra_total = sum(TotalPrice), count = n()) %>% 
+  arrange(desc(count)) 
+
+cliente_mas_c <- head(cliente_mas_c,5)
+
+cliente_mas_compras <- df_clean_dt %>% 
+  filter(CustomerID == cliente_mas_c$CustomerID) %>%
+  group_by(InvoiceNo,CustomerID) %>% 
+  distinct() %>%
+  select(CustomerID,mean_time,dif_time, TotalPrice, Quantity) %>%
+  summarise(t_medio = mean(dif_time), compra_total = sum(TotalPrice)) %>% 
+  arrange(desc(t_medio)) 
+
+
+ggplot(cliente_mas_compras, aes(x = t_medio, y=compra_total, color=as.factor(CustomerID))) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual(values=c("#999999", "#E69F00", "#56B4E9","red","blue"))+
+  theme(legend.position = "top") + 
+  xlab("Tiempo en días desde la ultima compra") +
+  ggtitle("Distribución de compras en el tiempo desde la ultima compra")
+
+
+```
+
+
+
+Si nos fijamos en los clientes que más compras han hecho, llama la atención el cliente 14096 se puede ver que las compras han ido aumentando conforme avanza el tiempo, es decir empezó comprando poco, que es lo que indica el ultimo registro, hasta alcanzar un máximo en la ultima compra. Sería interesante ver cuantos clientes tienen este comportamiento. El resto de clientes que mas compras han hecho tienen un comportamiento estable a lo largo del tiempo, si se elimina el amarillo para ver esto mejor:
+
+```{r}
+
+#Se filtran los datos eliminando el cliente 14096
+cliente_mas_compras_f<- cliente_mas_compras %>% filter(CustomerID!=14096) 
+  
+ggplot(cliente_mas_compras_f, aes(x = t_medio, y=compra_total, color=as.factor(CustomerID))) +
+    geom_line() +
+    geom_point() +
+    scale_color_manual(values=c("#999999", "#56B4E9","red","blue"))+
+    theme(legend.position = "top") + 
+    xlab("Tiempo en días desde la ultima compra") +
+    ggtitle("Distribución de compras en el tiempo desde la ultima compra")
+
+
+
+```
+
+Como se ha dicho antes se observa un comportamiento estable en las compras. Sería interesante identificar los clientes que más compran y los que más dinero gastan, aunque compren menos veces. Interesa fidelizar a estos clientes y que continúen comprando.
+
+##### Tiempo medio entre transacciones
+Si queremos ver el comportamiento en las compras en general, sin tener en cuenta los clientes, tomamos como referencia la ultima compra en general y se la restamos al resto de compras, lo que se ha hecho anteriormente
+```{r}
+t_medio_cliente <- df_clean_dt %>%
+  group_by(InvoiceNo) %>% #Se agrupa por Factura (y por tanto por cliente)
+  distinct() %>% #Se escogen solo los registros unicos para no duplicar el numero de compras. 
+  select(CustomerID,mean_time,dif_time,dif_time_g, TotalPrice, Quantity) %>%
+  summarise(t_mediog = mean(dif_time_g), compra_total = sum(TotalPrice), count = n()) %>% 
+  arrange(desc(count)) 
+
+
+ggplot(t_medio_cliente, aes(x = t_mediog)) +
+  geom_histogram(position = "identity",color = "black", fill = "white",binwidth = 2) +
+  theme(legend.position = "top") + 
+  scale_color_grey() +
+  scale_fill_grey() +
+  xlab("Tiempo en días") +
+  xlim(0.5,400)+
+  ggtitle("Distribución de compras en el tiempo desde la ultima compra")
+```
+
+Se puede ver que el tiempo medio entre compras equivaldría a hacer la inversa del tiempo en el histograma. (Por formato de la variable de diferencia de tiempo no soy capaz de hacer la inversa y no he encontrado forma de arreglarlo)
+
+
+
+
+## Análisis por países
+
+Media de precio gastado por país con los datos sin valores de na y solo con los valores NA. Se puede observar como el ticket medio en la base de datos df_clean es mucho mas alto que en la que contiene solo los clientes sin identificar, por lo tanto se podría considerar que en este caso los clientes sin identificar son compras de particulares y las otras se corresponden a comprar de tiendas para luego venderlas.
+```{r}
+#Ticket medio por Paises
+paged_table(
+  df_clean_dt[,.(mediaPais = mean(TotalPrice)), by = c('Country','Cliente')][order(-mediaPais)]
+)
+
+df_clean_dt[,mediaPais := mean(TotalPrice), by = c('Country','Cliente')]
+
+
+```
+
+La media por ticket de los clientes sin identificar es generalmente menor que la de los clientes identificados excepto en Bahrain. 
+
+```{r}
+ggplot(df_clean_dt, aes(x = reorder(Country,mediaPais), y = mediaPais, fill = Cliente)) +
+  geom_bar(stat = "identity",  position="dodge") +
+  coord_flip()+
+  ylab("Pais")
+
+```
+
+
+
+Media de precio gastado por ticket, para ello se suma el precio total por ticket y se hace un resumen de los resultados.
+```{r}
+df_clean_dt[,.(totalTicket = sum(TotalPrice)), by = c('Country',"Cliente")][order(-totalTicket)]
+df_clean_dt[,totalTicket := sum(TotalPrice), by = c('Country',"Cliente")]
+
+knitr::kable(summary(df_clean_dt)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+```
+
+
+vemos como las compras se localizan entre 0 y 2000, por lo que vamos a redibujar gráfico fijándonos solo en esas compras.
+
+
+```{r}
+ggplot(df_clean_dt, aes(x = reorder(Country,totalTicket), y = totalTicket, fill = Cliente)) +
+  geom_bar(stat = "identity",  position="dodge") +
+  coord_flip()
+
+```
+
+
+Eliminamos el reino unido porque no deja observar bien lo que pasa en el resto de paises
+
+```{r}
+df_clean_noUK<-filter(df_clean_dt, df_clean_dt$Country != "United Kingdom")
+
+ggplot(df_clean_noUK, aes(x = reorder(Country,totalTicket), y = totalTicket, fill = Cliente)) +
+  geom_bar(stat = "identity",  position="dodge") +
+  coord_flip()
+```
+
+Se puede ver que, como se calculó anteriormente, el total de las compras la realizan clientes que se identifican.
+
+
+
+
+#### Mercado interno
+```{r}
+#Porcentaje de mercado interno:
+df_clean_UK <- filter(df_clean_dt, df_clean_dt$Country == "United Kingdom")
+TotalUK <- sum(df_clean_UK$TotalPrice)
+TotalOther <- sum(df_clean_noUK$TotalPrice)
+
+data <-data.frame(pais=c("United Kingdom","others"),value=c(TotalUK,TotalOther))
+
+data <- data %>% 
+  arrange(desc(pais)) %>%
+  mutate(prop = value / sum(data$value) *100) 
+
+ggplot(data, aes(x="", y=value, fill=pais)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0)+
+  theme_void() +
+  geom_text(aes(y=c(2.5e6,1e7), label = paste(round(prop),"%")), color = "black", size=4) +
+  scale_fill_brewer(palette="Set1") +
+  ggtitle("Porcentaje mercado interno")
+
+
+```
+
+
+
+#### Calculo por orden agrupados en paises y meses
+```{r}
+calculo_por_paismes <- df_clean2 %>% 
+  group_by(Country,MY) %>%
+  mutate(TotalPais = sum(TotalPrice)) %>% 
+  select(Country,ticket,TotalPais,MY,InvoiceNo) %>%
+  arrange(desc(ticket)) %>%
+  summarise(media_ticket_mes = mean(ticket), max = max(ticket), max=max(TotalPais))
+
+calculo_plot<-filter(calculo_por_paismes,max>20000 )
+
+ggplot(calculo_plot, aes(x = MY, y = media_ticket_mes)) +
+  geom_bar(stat = "identity",  position="dodge") +
+  facet_wrap(~Country)+
+   theme(axis.text.x = element_text(angle = 90))+
+  ylab("Media ticket") +
+  ggtitle("Ticket medio por mes y país")
+  
+```
+
+Se observa como la mayoria de paises no compra todos los meses y hacen compras grandes pero menos asiduamente, sin embargo en el Reino Unido y en Paises Bajos las compras son mas constantes. vamos a ver que ocurre con el reino unido, mas de cerca.
+
+```{r}
+calculo_plot<-filter(calculo_por_paismes,Country=="United Kingdom")
+ggplot(calculo_plot, aes(x = MY, y = media_ticket_mes)) +
+  geom_bar(stat = "identity",  position="dodge") +
+   theme(axis.text.x = element_text(angle = 90)) +
+  ylab("Media ticket")
+```
+
+Los meses de más gasto son diciembre y noviembre, probablemente por compras de navidad. Este cmportamiento aunque se ha observaado en el gráfico general, no así en los paises con mas compras. 
+
+
+
+
+
+Se puede ver que la mayor parte de las compras esta por debajo de los 17.7 asumimos que libras. Pero se observa en el diagrama de cajas que la dispersión es muy grande, por lo que va a calcular por países.
+
+```{r}
+quantile(df_clean$TotalPrice, c(0.25,0.5,0.75))
+```
+
+```{r}
+df_clean %>% group_by(Country) %>% 
+  summarise(q1=quantile(TotalPrice, 0.25),
+            q2=quantile(TotalPrice,0.5),
+            q3=quantile(TotalPrice, 0.75)) %>%
+  arrange(desc(q3))
+```
+
+#### Ordenamos por el número de factura
+
+Sacamos el total de cada factura, el numero de artículos distintos que tiene cada una y los artículos totales
+
+```{r}
+by_invoice <- group_by(df_clean, InvoiceNo)
+
+paged_table(
+summarize(by_invoice, cuenta = n(), ticket = sum(TotalPrice), cantidad = sum(Quantity)) %>%
+  arrange(desc(cuenta)))
+
+knitr::kable(summary(summarize(by_invoice, cuenta = n(), ticket = sum(TotalPrice), cantidad = sum(Quantity)) %>%
+  arrange(desc(cuenta)))) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+
+```
+
+#### Numero de factura y pais
+```{r}
+by_country <- group_by(df_clean, Country,InvoiceNo)
+
+summary_country<-summarize(by_country,
+  cuenta = n(),
+  ticket_mean = sum(TotalPrice)) %>%
+  arrange(desc(ticket_mean))
+
+paged_table(summary_country)
+
+knitr::kable(summary(summary_country)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+
+```
+
+Se observa que las facturas mas altas son del Reino Unido, de pocos articulos, esto podría analizarse más a fondo para ver que tipo de articulos son. 
+
+## Agrupamos por tipo de elemento
+
+Calulculamos el objeto mas comprado y vemos qué paises son los que los compran.
+
+```{r}
+by_description <- df_clean %>% 
+  group_by(Description,Country) %>% 
+  summarize(cuenta = n(), cantidad = sum(Quantity)) %>%
+  arrange(desc(cantidad))
+
+
+top10_des<-head(by_description,10)
+
+knitr::kable((top10_des)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+
+ggplot(top10_des, aes(x = reorder(Description,-cantidad), y = cantidad)) +
+  geom_bar(stat = "identity",  position="dodge") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  xlab("Description")+
+  ggtitle("Objetos más comprados")
+```
+
+##### Objetos más caros:
+
+
+```{r}
+df_clean %>% select(Description,UnitPrice) %>% distinct() %>% arrange(desc(UnitPrice))
+
+```
+Los articulos más caros son comisiones y gastos de envío. Se eliminan estos datos para ver los articulos reales. 
+
+```{r}
+df_clean %>% filter(Description!="POSTAGE" & Description!="DOTCOM POSTAGE" & Description!="Manual" & Description!="AMAZON FEE"  & Description!="Adjust bad debt")%>%select(Description,UnitPrice) %>% distinct() %>% arrange(desc(UnitPrice))
+
+df_clean_articulos<-df_clean %>% filter(Description!="POSTAGE" & Description!="DOTCOM POSTAGE" & Description!="Manual" & Description!="AMAZON FEE"  & Description!="Adjust bad debt")
+```
+
+Hemos estado viendo y analizando el flujo de caja total, sin tener en cuenta estos gastos de envío. Por lo que se podrían repetir todos los calculos anteriores sin tener en cuenta estos gastos de envío:
+
+
+```{r}
+
+calculo_por_mesf <- df_clean_articulos %>%
+  group_by(MY) %>%
+  summarise(totalTicket = sum(TotalPrice))
+
+calculo_por_mes <- df_clean %>%
+  group_by(MY) %>%
+  summarise(totalTicket = sum(TotalPrice))
+
+calculo_por_mes$group<-"Todos los articulos"
+calculo_por_mesf$group<-"Articulos Filtrados"
+
+calculo_mes2 <- rbind(calculo_por_mes,calculo_por_mesf)
+
+p <- ggplot(calculo_mes2, aes(x=MY, y=totalTicket, group=group, col=group, fill=group)) +
+      geom_bar(stat = "identity",  position = "dodge") +
+  ylab("Compras totales GPB") +
+  xlab("Mes") +
+  theme(axis.text.x = element_text(angle = 90))
+
+p
+```
+
+Se observa que la tendencia es la misma, solamente afecta al valor total de las compras. Estos articulos son de más precio, pero solo suele haber 1 por factura, por lo tanto las transacciones totales no se ven demasiado afectadas. Los calculos anteriores pueden mantenerse teniendo en cuenta este hecho, pero las tendencias no van a cambiar.
+
+Con estos datos se podría analizar si los gastos de envío y las comisiones varían por países, por volumen de compra, etc.
+
+## Agrupamos por cliente sin tener en cuenta los no identificados
+
+Facturacion por clientes
+```{r}
+by_cliente <- df_clean %>%
+  filter(Cliente=="ID") %>% 
+  group_by(CustomerID,Country) %>% 
+  summarize(cuenta = n(),
+            total=sum(TotalPrice)) %>%
+  arrange(desc(cuenta))
+
+
+top10_clientes<-head(by_cliente,10)
+
+knitr::kable((top10_clientes)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+
+ggplot(top10_clientes, aes(x = reorder(CustomerID,-total), y = total)) +
+  geom_bar(stat = "identity",  position="dodge") +
+   theme(axis.text.x = element_text(angle = 90))+
+   geom_text(aes(label=Country), position=position_dodge(width=0.9), vjust=0, angle=90, size=3) +
+  xlab("CostumerID")+
+  ylab("Compras GBP")+
+  ggtitle("Top 10 clientes")
+
+```
+
+## Devoluciones
+
+Calclulamos las transacciones al mes, y diferenciamos las ventas de otros
+```{r}
+
+df <- df %>% 
+  mutate(Mes = fct_relevel(Mes, "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"))
+
+calculo_dev <- df %>%
+  group_by(Mes,Dia_mes, Invoicecode)  %>% 
+  summarise(totalTicket=sum(TotalPrice), cantidad=sum(Quantity))
+
+ggplot(calculo_dev, aes(x = Dia_mes, y = cantidad,fill=Invoicecode)) +
+  geom_bar(stat = "identity",  position="dodge") +
+  facet_wrap(~Mes)+
+  theme(axis.text.x = element_text(angle = 90))+
+  ggtitle("Ventas y devoluciones por mes")
+```
+
+
+La cantidad de devoluciones es casi inapreciable, excepto en diciembre y enero, donde presumiblemente, debido al provisionamiento para las compras de navidad, que puede llevar a compras de más o erróneas, también se observa en enero.
+
+
+## Precio 0
+
+Vamos a ver que ocurre con los items de precio 0
+```{r}
+calculo_precio0<- df %>%
+  filter(UnitPrice==0) %>%
+  select(Description,Quantity) %>% arrange(desc(Quantity))
+
+paged_table(calculo_precio0)
+  
+```
+
+La mayor parte de los items gratis tienen un codigo de error, pero hay otros que no, estos podrían ser regalos por compras grandes. Se observa que las descripciones no erróneas están en mayúsculas.
+
+
+```{r}
+free_codigoO <- df %>% 
+  mutate(MY=paste(Mes,Year)) %>%
+  filter(UnitPrice==0 & Description==toupper(Description) & Quantity>0 ) %>% 
+  group_by(Description,MY) %>% 
+  summarise(cuenta=n(),cantidad=sum(Quantity)) %>% 
+  arrange(desc(cuenta))
+
+paged_table(free_codigoO)
+
+
+ggplot(free_codigoO, aes(x = MY, y = cantidad)) +
+  geom_bar(stat = "identity",  position="dodge") +
+  theme(axis.text.x = element_text(angle = 90))+
+  xlab("Mes")+
+  ylab("Cantidad")+
+  ggtitle("Articulos gratis por mes")
+```
+
+El mes que más articulos se regalaron fue en Noviembre, vamos a agrupar por Cliente para ver si es a un solo cliente o a mas.
+
+
+```{r}
+free_codigoOk <- df %>% 
+  mutate(MY=paste(Mes,Year)) %>%
+  filter(UnitPrice==0 & Description==toupper(Description) & Quantity>0 & Description!="?") %>% 
+  group_by(Description,MY,CustomerID) %>% 
+  summarise(cantidad=sum(Quantity)) %>% 
+  arrange(desc(cantidad),MY,CustomerID)
+
+paged_table(free_codigoOk)
+
+```
+Se observa como casi la totalidad de los productos devueltos son un unico producto, a un unico cliente en un unico mes.
+
+¿Compró ese cliente, ese mes mas cosas?
+
+
+```{r}
+Cliente_13256 <- df %>% mutate(MY=paste(Mes,Year)) %>% filter(CustomerID==13256 ) 
+Cliente_13256
+```
+
+Es el unico cargo a ese cliente, por tanto, se ha hecho bien en utilizar para el resto de calculos los registros con precio mayor que 0 y cantidad positiva, puesto que parece que este tipo de registros pueden ser erróneos.
+
+
+## Conclusiones
+
+
+- El país que más compra en cantidad y en precio total es Reino Unido, con un 85% de la facturación total
+
+- El mes que más se compra es noviembre, puede que por la preparación de la campaña de navidad.
+
+- La hora del día que más compras hay son las 12.00, las compras se concentran mayoritariamente en las horas centrales del día , de 10 a 15h.
+
+- Con la distribución de compras en el timepo por cliente, se puede ver qué clientes son más estables en las compras.
+
+- Los clientes identificados suponen un 84% de la facturación. También se observa que los identificados gastan una media más por ticket que los sin identificar, excepto en Brahain. 
+
+- Con respecto a la limpieza de los datos se comprueba que los datos negativos y con precio 0 no proporcionan mucha información por lo tanto no es incorrecto considerarlos errores. También se podrían haber eliminado los conceptos de gastos de envío y comisiones para poder tener una mejor idea de la facturación real de la empresa. Bastaría con repetir los calculos con los datos filtrados. No se han repetido todos pero si se han recalculado las ventas por meses.
+
+Muchos más análisis se pueden extraer de esta base de datos si además se les aplica algún metodo de regresión, para predicción de compras futuras o más avanzado, algún método de clustering para identificar grupos de clientes por volumen de compra y objetos comprados. 

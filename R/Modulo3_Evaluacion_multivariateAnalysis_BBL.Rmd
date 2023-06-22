@@ -1,0 +1,908 @@
+---
+title: "Evaluación Módulo 3"
+author: "Bárbara Bellón Lara DNI 05709025"
+date: "21/3/2020"
+output: 
+    html_document:
+      highlight: tango
+      theme: simplex
+      toc: true
+      toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Ejercicio 1
+
+Lea los datos del fichero oecd, el cual tiene los siguientes campos:
+
+- country
+-	GDP (PIB)
+-	debt.gdp.ratio (Ratio de deuda sobre el PIB)
+-	debt (deuda)
+-	share.of.debt (porcentaje de deuda sobre el total de la deuda de la OCDE)
+
+Muestre los primeros y los últimos registros y realice un sumario de estadísticas.
+
+```{r}
+datos<-read.csv("oecd.txt",sep = ",")
+
+head(datos)
+tail(datos)
+```
+
+```{r}
+summary(datos)
+```
+
+Se puede observa como los paises con un PIB más alto tienen también una deuda más alta. Vemos también como la media y la mediana son muy distintas en cada uno de los valores, esto es porque estos valores están desplazados hacia la izquierda. Es decir la mediana es más pequeña que la media porque está menos afectada por los valores extremos.
+
+```{r}
+
+library(tidyr)
+library(ggplot2)
+
+datos[,c(2,4)] %>% 
+  gather(key=Type, value=Value) %>% 
+  ggplot(aes(x=Value,fill=Type)) + 
+  geom_histogram(position="dodge",breaks=seq(0,20000,by=1000),alpha=0.7)
+datos[,c(3,5)] %>% 
+  gather(key=Type, value=Value) %>% 
+  ggplot(aes(x=Value,fill=Type)) + 
+  geom_histogram(position="dodge",breaks=seq(0,200,by=10),alpha=0.7)
+```
+
+- Represente gráficamente la relación entre la ratio de deuda sobre el PIB (X) y el porcentaje de deuda sobre el total de la deuda de la OCDE (Y). Ponga título al gráfico y a los ejes X e Y
+```{r}
+library(car)
+
+scatterplot(share.of.debt~debt.gdp.ratio, 
+            data = datos, 
+            regLine = TRUE, 
+            smooth =F,
+            ellipse = TRUE,
+            cex = 1.5,
+            col = "red",
+            cex.lab = 1.2,
+            xlab = "Deuda sobre el PIB",
+            ylab = "Porcentaje de deuda sobre el total",
+            main = "Porcentaje de deuda sobre el total vs ratio de deuda sobre el PIB de cada país")
+```
+
+Se puede apreciar claramente tanto en las elipses como en los boxplot que proporciona el modelo, los datos, para ambas variables estan muy agrupados en valores bajos de ambas variables y como hay pocos valores muy altos para ambas variables. Esto nos indica la necesidad de una tranformación logaritmica en ambos ejes, la cual proporcionaría un modelo lineal. Se comprueba graficando los datos, sin tranformar, pero en ejes logaritmicos:
+
+```{r}
+library(ggplot2)
+ggplot(datos,aes(debt.gdp.ratio,share.of.debt))+ 
+   geom_point()+
+   scale_y_log10()+
+   scale_x_log10()+
+   theme_bw()+
+   theme(aspect.ratio = 1)+
+   labs(x="debt/GDP", y="debt/total debt OECD", title= "Log-Log debt/GDP vs debt/total debt OECD" )
+```
+
+# Ejercicio 2
+
+- Realice una regresión lineal simple por Mínimos Cuadrados Ordinarios. Presente sumario de resultados y estadísticas de los residuos.
+
+Regresion lineal de los valores sin transformar en logaritmos
+```{r}
+mod1<- lm(share.of.debt~debt.gdp.ratio, data=datos)
+summary(mod1)
+par(pty="s")
+plot(share.of.debt~debt.gdp.ratio,data = datos)
+lines(mod1$fitted~datos$debt.gdp.ratio)
+```
+
+
+Regresion lineal de los valores tranformados en logaritmos
+```{r}
+log.share<-log(datos$share.of.debt)
+log.ratio<-log(datos$debt.gdp.ratio)
+mod2 <- lm(log.share~log.ratio)
+summary(mod2)
+par(pty="s")
+plot(log(share.of.debt)~log(debt.gdp.ratio),data = datos)
+lines(mod2$fitted~log(datos$debt.gdp.ratio))
+```
+
+La especificacion del modelo mejora cuando se usa el modelo con logaritmos.
+
+- ¿son significativos los coeficientes?
+
+Los coeficientes son mas significativos en el modelo con logaritmos y también mejora el valor de $R^2$.
+
+
+- ¿son normales los residuos?
+
+```{r}
+library(lmtest)
+library(nortest)
+par(pty="s")
+plot(mod1, which=2, col='red', cex=1.2)
+# Test de normalidad
+lillie.test( mod1$residuals )
+shapiro.test( mod1$residuals )
+```
+```{r}
+par(pty="s")
+plot(mod2, which=2, col='red', cex=1.2)
+# Test de normalidad
+lillie.test( mod2$residuals )
+shapiro.test( mod2$residuals )
+```
+
+Se observan los qqplots de los dos modelos, estos gráficos dan una idea de la normalidad de la distribución pero son un poco dificiles de interpretar. Para comprobar de manera más segura la normalidad de los residuos se realiza el test de Lilliefors y el de Shapiro-Wilk, que contrastan la hipótesis nula de normalidad frente la alternativa de no normalidad. En este caso para el mod1 los residuos no son normales porque el test tiene un p-valor<0.05, sin embargo para el mod2 los residuos si siguen una distribución normal. Sabiendo esto, mirando ahora los gráficos qqplot, podemos ver que en el caso del mod1 los valores se alejan mas de la diagonal que en el mod2.
+
+- ¿hay problemas de valores extremos?
+
+Para comprobar esto podemos fijarnos en los gráficos de leverage y en las distancias de Cook
+
+```{r}
+cooks.distance(mod1)>1
+cooks.distance(mod2)>1
+par(pty="s")
+plot(mod1,4)
+plot(mod2,4)
+
+plot(mod1, which= 5)
+plot(mod2, which= 5)
+```
+
+Vemos como en el mod1 se obtiene un valor con una ditancia de cook mayor que 1 y otros cerca de 0.5. Sin embargo en el mod2 todas las distancias de cook están por debajo de 0.2, por lo que en este último no tenemos problemas de valores extremos.
+
+- ¿hay problemas de heterocedasticidad?
+
+
+```{r}
+library(tseries)
+library(lmtest)
+
+white.test(datos$debt.gdp.ratio,datos$share.of.debt)
+white.test(log(datos$debt.gdp.ratio),log(datos$share.of.debt))
+bptest(mod1, data = datos)
+bptest(mod2, data = datos)
+```
+
+Los pvalores son mayores que la significación por tanto se acepta la hipótesis de homocedasticidad para ambos modelos 
+
+
+
+Como se ha podido observar, el modelo con transformación en logaritmos mejora significativamente el modelo. En ambos modelos las $\beta$ son significativas, (excepto el mod1 que el término independiente aparece como no significativo, pero en este caso esto es debido a que hay muchos valores agrupados en valores bajos de las ambas variables y la regresión ajusta los MCO de esa manera para poder ajustar todos los valores). Para comprobar la significación del modelo se comprueba el valor de $R^2$, en el caso del mod1 es muy bajo, de aproximadamente 0.2, lo que quiere decir que solo un 20% de los valores son explicados por el modelo. Al realizar la transformación logarítmica se incrementa el valor de $R^2$a un 48%. Este valor no es muy alto, pero se ha producido una mejora con respecto al anterior. Además, al realizar el modelo con logaritmos, se mejora la normalidad de los residuos. No hay nigún efecto en la homocedasticidad, ya que los residuos son homocedasticos en ambos modelos, como se ha comprobado con los test de White y Breusch-Pagan.
+
+Para intentar mejorar el modelo se podría realizar un método forward o backwards utilizando el resto de las variables y comprobando no solo el BIC, sino también la autocorrelación de residuos y de variables en cada modelo propuesto.
+
+# Ejercicio 3
+
+- Plantee una regresión lineal múltiple que explique porcentaje de deuda sobre el total de la deuda de la OCDE y el PIB utilizando una regresión polinómica de orden 2 y 3. Evalúe los resultados del modelo. Establezca un intervalo de confianza para los coeficientes con  y . Evalúe los resultados obtenidos en los dos modelos. Intente solucionar los problemas de los valores extremos utilizando variables dummies.
+
+
+```{r}
+mod_pol2<-lm(share.of.debt~poly(gdp,2,raw=TRUE), data=datos)
+summary(mod_pol2)
+par(pty="s")
+plot(mod_pol2)
+newdata = data.frame(gdp = seq(min(datos$gdp), max(datos$gdp), length.out = 1000))
+newdata$pred = predict(mod_pol2, newdata = newdata)
+
+plot(share.of.debt ~ gdp, data = datos)
+with(newdata, lines(x = gdp, y = pred))
+outlierTest(mod_pol2)
+points(datos$gdp[1:2], datos$share.of.debt[1:2], col="red")
+
+```
+
+```{r}
+confint.lm( mod_pol2, level = 0.90 )
+confint.lm( mod_pol2, level = 0.95 )
+```
+
+```{r}
+datos[cooks.distance(mod_pol2)>1,]
+```
+
+
+```{r}
+par(pty="s")
+mod_pol3<-lm(share.of.debt~poly(gdp,3,raw=TRUE), data=datos)
+summary(mod_pol3)
+plot(mod_pol3)
+newdata2 = data.frame(gdp = seq(min(datos$gdp), max(datos$gdp), length.out = 100))
+newdata2$pred = predict(mod_pol3, newdata = newdata2)
+outlierTest(mod_pol3)
+plot(share.of.debt ~ gdp, data = datos, ylim=c(0,80))
+with(newdata2, lines(x = gdp, y = pred))
+points(datos$gdp[1:2], datos$share.of.debt[1:2], col="red")
+points(datos$gdp[5], datos$share.of.debt[5], col="red")
+```
+
+```{r}
+datos[cooks.distance(mod_pol3)>1,]
+```
+
+```{r}
+confint.lm( mod_pol3, level = 0.95 )
+confint.lm( mod_pol3, level = 0.90 )
+```
+
+Fijándonos en el pvalor de los estimadores podemos ver que en el modelo cuadrático todos son significativos, mientras que en el cúbico solo los correspondientes a la variable al cuadrado y al cubo lo son. El valor de $R^2$ es de 0.89 para el modelo cuadrático y 0.95 para el modelo cúbico. Pero ambos presentan outliers. Ademas como se puede observar en las gráficas que muestran el modelo y los datos pueden llevar a pensar que se está produciendo un overfitting.
+
+
+
+Podemos ver que los valores del PIB para los outliers son mayores de 3000, Si se analiza el resto de variables se observa que cualquier otro criterio eliminaría muchas variables, teniendo un data set tan pequeño no es conveniente eliminar más variables de las necesarias. Se han considerado dos variables dummy, dummy 1 se clasifican los paises segun los quantiles del PIB, los que estan por encima del 75% se consideran alto y los que estan por debajo del 25 medio. Igual se hace con la variable dummy2 pero con el ratio sobre la deuda. También se ha creado una más simple que contenga a los datos que provocaban valores extremos.
+
+```{r}
+quant_gdp<-quantile(datos$gdp)
+quant_debt.gdp.ratio<-quantile(datos$debt.gdp.ratio)
+datos$dummy<-as.factor(ifelse(datos$gdp>3000,1,0))
+datos$dummy_gdp<-as.factor(ifelse(datos$gdp>quant_gdp[4], "alto", ifelse(datos$gdp<quant_gdp[2],"bajo","medio")))
+datos$dummy_ratio<-as.factor(ifelse(datos$debt.gdp.ratio>quant_debt.gdp.ratio[4], "alto", ifelse(datos$debt.gdp.ratio<quant_debt.gdp.ratio[2],"bajo","medio")))
+```
+
+
+
+```{r}
+#modelo con dummy segun PIB
+mod_pol2.1<-lm(share.of.debt~poly(gdp,2,raw=TRUE)+dummy_gdp, data=datos)
+summary(mod_pol2.1)
+plot(mod_pol2.1,which=5)
+cooks.distance(mod_pol2.1)>1
+#modelo con dummy según ratio de la deuda sobre el PIB
+mod_pol2.2<-lm(share.of.debt~poly(gdp,2,raw=TRUE)+dummy_ratio, data=datos)
+summary(mod_pol2.2)
+plot(mod_pol2.2,which=5)
+cooks.distance(mod_pol2.2)>1
+
+mod_pol2.3<-lm(share.of.debt~poly(gdp,2,raw=TRUE)+dummy, data=datos)
+summary(mod_pol2.3)
+plot(mod_pol2.3,which=5)
+cooks.distance(mod_pol2.3)
+
+```
+```{r}
+
+mod_pol3.1<-lm(share.of.debt~poly(gdp,3,raw=TRUE)+dummy_gdp, data=datos)
+summary(mod_pol3.1)
+plot(mod_pol3.1)
+
+mod_pol3.2<-lm(share.of.debt~poly(gdp,3,raw=TRUE)+dummy_ratio, data=datos)
+summary(mod_pol3.2)
+plot(mod_pol3.2)
+```
+
+Se puede observar añadiendo la variable dummy a los paises con un porcentaje de la deuda mayor del 20% los modelos, de grado 2 y 3 son casi identicos, presentando los mismos estimadores y en el caso del modelo del polinomio de grado 3, el estimador correspondiente al tercer grado no es significativo. Por lo tanto de estos dos modelos el más adecuado, a priori es el de grado 2. Vamos a hacer una compraracion de los dos modelos en cuanto a normalidad, heterodasticidad, correlacion y mejor AIC
+
+```{r}
+library(rcompanion)
+anova(mod_pol2,mod_pol3,mod_pol2.1,mod_pol2.2,mod_pol2.3,mod_pol3.1,mod_pol3.2)
+compareLM(mod_pol2,mod_pol3,mod_pol2.1,mod_pol2.2,mod_pol2.3,mod_pol3.1,mod_pol3.2)
+```
+
+
+
+El mejor modelo, según la comparación con anova, la devianza, AIC y BIC es el modelo 3.2, que es el modelo polinomial de tercer grado que incluye la variable dummy que filtra los datos por el PIB. Aunque el modelo no mejora signoficativamente con respecto al modelo sin la variable dummy. 
+
+Ahora elegido el modelo 3.2, se ve si cumple los supuestos de homocedasticidad, normalidad y valores extremos:
+
+```{r}
+#Normalidad
+shapiro.test(mod_pol3.2$residuals)
+```
+ 
+Como la muestra es pequeña se realiza un test de Shapiro. Según los test de normalidad, los residuos no son normales. 
+
+```{r}
+par(pty="s")
+plot(mod_pol3.2, which = 2)
+```
+
+
+```{r}
+#homocedasticidad
+bptest(mod_pol3.2)
+```
+
+Los residuos no son homocedasticos, ya que el pvalor es mas pequeño que el nivel de significación.
+
+```{r}
+#valores extremos
+plot(mod_pol3.1, 4)
+```
+
+No cumple ninguno de los supuestos, vamos a ver que ocurre con el polinomico de tercer grado:
+
+
+```{r}
+#Normalidad
+shapiro.test(mod_pol3$residuals)
+```
+
+Lo residuos no son normales.
+
+```{r}
+par(pty="s")
+plot(mod_pol2,which = 2)
+```
+
+
+```{r}
+#homocedasticidad
+bptest(mod_pol3)
+```
+
+```{r}
+#valores extremos
+plot(mod_pol2,4)
+cooks.distance(mod_pol3.1)
+```
+
+El ajuste polinomial para estos datos no seria adecuado ya que aunque mejora la significación de los coeficientes y el porcentaje explicado por el modelo, no cumple ninguno de los supuestos de normalidad u homocedasticidad. 
+
+# Ejercicio 4
+- Entre los modelos analizados en el curso, ¿cuál cree que es el más adecuado para resolver los problemas que ha encontrado en la mejor relación lineal entre el porcentaje de deuda sobre el total de la deuda de la OCDE y la tasa de deuda sobre el PIB?. Realice el ejercicio con el modelo que considere el más idóneo. Evalúe la normalidad de los residuos. Presente un gráfico con los porcentajes de deuda observados, los porcentajes estimados, y las bandas de confianza para los valores estimados con una α=0.05 y realice la predicción que daría el modelo para un país que lograra una tasa de deuda sobre el PIB del 25%.
+
+En el ejercicio 2 se presentaron 2 modelos, uno con niveles y otro con logartimos. De estos dos modelos el de logaritmos no presenta problemas de normalidad, ni de heterodasticidad. Sin embargo, el valor de $R^2$ es muy bajo, por lo que se podría mejorar probando otros modelos o añadiendo otras variables. Otro test importante sería el de correlación, para ver si estas dos variables están correlacionadas y sería mejor escoger otras. 
+
+Se va a empezar por mirar si los datos están correlacionados mediante distintos test de autocorrelacion, para ver si el modelo tiene o no sentido. Primero un test para ver si las variables están correlaciondas
+
+```{r}
+dwtest(mod1, data = datos)
+dwtest(mod2)
+```
+Los residuos están autocorrelados, ya que se ha obtenido un valor del estadistico de Durbin-Watson menor que  por lo tanto habría que buscar otras y un p-valor mucho menor que el nivel de significación, por tanto se rechaza la hipótesis nula de no correlación. Por lo tanto se tienen varias opciones, o usar otras variables para explicar el porcentaje de la deuda con respecto al total de la OCDE o si no es posible realizar una regresion ridge.
+
+Dados estos resultados se va a proponer un modelo con más variables y para realizarlo utilizamos el método forward. Se ha omitido la varibale deuda porque, en este caso la deuda esta relacionada con el ratio de la deuda sobre el PIB. Por lo tanto y como vemos en la gráfica, son totalmente proporcionales, porque uno se calcula con el otro. por tanto no tiene sentido utilizar este valor, lo eliminamos de la comparacion en metodo forward.
+
+```{r}
+plot(datos$share.of.debt~datos$debt)
+```
+
+
+```{r}
+library(leaps)
+regfit.fwd = regsubsets(share.of.debt~gdp+debt.gdp.ratio,data=datos,method="forward") 
+summary(regfit.fwd,scale=bic)
+```
+```{r}
+par(mfrow = c(1, 2))
+plot(regfit.fwd, main="Basado en BIC",col = heat.colors(5, alpha = 1))
+plot(regfit.fwd, main="Basado en R2 Ajustado",scale="adjr2", col = heat.colors(5, alpha = 1))
+```
+
+```{r}
+summary(regfit.fwd)$which[which(summary(regfit.fwd)[["bic"]]==min(summary(regfit.fwd)[["bic"]])),]
+```
+
+
+Los mejores resultados son si se incluyen gdp y debt.gdp.ratio. Vamos a ver el modelo incluyendo estas dos variables:
+
+```{r}
+mod3<-lm(share.of.debt~gdp+debt.gdp.ratio, data=datos)
+summary(mod3)
+```
+
+En este caso todos los coeficientes son significativos, el $R^2$ ha aumentado significativamente.
+
+Test de normalidad, heterodasticidad, correlacion de residuos y valores extremos:
+
+```{r}
+shapiro.test(mod3$residuals)
+bptest(mod3,~gdp*debt.gdp.ratio+I(gdp^2)+I(debt.gdp.ratio^2), data=datos)
+dwtest(share.of.debt~gdp+debt.gdp.ratio, data=datos)
+cooks.distance(mod3)>1
+plot(cooks.distance(mod3), bg='black', cex=1.2, ylab="Cook's distance", main = "mod3")
+plot(mod3,which=5)
+```
+
+Tenemos problemas de homocedasticidad, normalidad y de valores influyentes, sin embargo, no tenemos problemas de correlación.
+
+
+El modelo que menos problemas tiene siguie siendo el modelo en logaritmos, pero su capacidad explicativa es baja. Como tenemos un modelo con pocas observaciones, vamos a cambiar de un enfoque frecuentista a uno bayesiano, para ver si mejoran las estimaciones.
+
+Si acotamos la varianza a priori segun el modelo de MCO, podemos reducir la varianza de estos parámetros
+```{r}
+library(MCMCpack)
+mean_vector <- c(-8.9138,2.0623)
+sd_vector <- c(1.5044,0.3698)
+sd_matrix <- matrix(c(1/(sd_vector[1]*sd_vector[1]),0,0,1/(sd_vector[2]*sd_vector[2])),nrow=2,ncol=2,byrow=TRUE)
+mod2.bayes <- MCMCregress( log.share~log.ratio,b0 = mean_vector, B0=sd_matrix  )
+summary(mod2.bayes)
+#plot(mod2.bayes)
+
+```
+
+La varianza residual no se mejora con respecto a la varianza obetenida por MCO, $\sigma ^2$ es 1.94, muy parecido al obtenido por MCO, cuyo `Residual standard error: 1.376`, que se traduce en un $\sigma^2=1.89$, por lo tanto menor incluso que el obtenido con el modelo bayesiano acotando las medias y varianzas. Tambien se puede observar que la distribución de $\sigma^2$ está desplazada bastante hacia la izquierda, por lo que se aleja un poco de una distribución gausiana ideal.
+
+
+Vamos a probar un modelo lineal generalizado con una función link distinta a la identidad:
+
+```{r}
+mod2.2<-glm(log.share~log.ratio, family = gaussian(link = "inverse"))
+summary(mod2.2)
+```
+```{r}
+AIC(mod2)
+```
+
+
+En este caso no se mejora el modelo, por lo que nos quedamos con el modelo en logaritmos.
+
+```{r}
+
+rango <- range(log.ratio)
+npuntos <- seq(from = rango[1], to = rango[2], by = 1)
+npuntos <- data.frame(log.ratio = npuntos)
+npredic_mod2  <- predict(mod2, newdata = npuntos, se.fit = TRUE, level = 0.95)
+intconf <- data.frame(inferior = npredic_mod2$fit - 1.96*npredic_mod2$se.fit,
+                      superior = npredic_mod2$fit + 1.96*npredic_mod2$se.fit)
+par(pty="s")
+plot(log.ratio,log.share, xlab = "log(debt.gdp.ratio)", ylab="log(share.of.debt)")
+title("Mod2   log(share.of.debt) - log(debt.gdp.ratio)")
+lines(npuntos$log.ratio,npredic_mod2$fit, col = "red", lwd = 2)
+lines(npuntos$log.ratio, intconf$inferior, col = "blue",
+      lwd = 2, lty = 2)
+lines(npuntos$log.ratio, intconf$superior, col = "blue", 
+      lwd = 2, lty = 2)
+```
+
+
+
+```{r}
+newdata <- data.frame(log.ratio=log(25))
+newdata$pred <- predict.lm(mod2, newdata = newdata,interval = "prediction", level = 0.95 )
+exp(newdata)
+```
+
+
+```{r}
+library(ggplot2)
+p1<-ggplot(datos,aes(debt.gdp.ratio,share.of.debt))+ 
+   geom_point()+
+   scale_y_log10()+
+   scale_x_log10()+
+   theme_bw()+
+   theme(aspect.ratio = 1)+
+   labs(x="debt/GDP", y="debt/total debt OECD", title= "Log-Log debt/GDP vs debt/total debt OECD")
+
+p1<-ggplot(newdata,aes(x=25,y=exp(pred[1])))+
+   geom_point(shape=4,col="red",size=4)+ geom_errorbar(aes(ymin=exp(pred[2]),ymax=exp(pred[3]),width=.3,col="red"),position=position_dodge(.05))
+p2<-p1+geom_point(data=datos,mapping=aes(debt.gdp.ratio,share.of.debt))+
+   scale_y_log10()+
+   scale_x_log10()+
+   theme_bw()+
+   theme(aspect.ratio = 1)+
+   labs(x="debt/GDP", y="debt/total debt OECD", title= "Log-Log debt/GDP vs debt/total debt OECD")
+
+
+print(p2)
+```
+
+Los intervalos de predicción soy  muy anchos porque la variabilidad en el modelo es muy alto, aún así, el dato de la predicción se ajusta bastante a la nube de puntos.
+
+
+
+# Ejercicio 5
+- Estime un modelo no lineal para los porcentajes de deuda y la tasa de deuda sobre el PIB. Utilice para ello, las técnicas de regresión splines y smoothing splines. Indique los grados de libertad que ha utilizado en cada técnica y justifique la selección de los tramos y del parámetro de suavizado. Presente los resultados en un gráfico. Compruebe si mejoran los resultados utilizando variables dummies auxiliares.
+
+Hacemos un smooth.spline con distintos parametros de spar: con cross validation, 0.8 y 0.5. 
+
+```{r}
+mod.spl1 <- smooth.spline(datos$share.of.debt~datos$debt.gdp.ratio, cv=TRUE)
+mod.spl1
+mod.spl2<- smooth.spline(datos$debt.gdp.ratio, datos$share.of.debt, spar=0.8)
+mod.spl2
+mod.spl3<- smooth.spline(datos$debt.gdp.ratio, datos$share.of.debt, spar=0.5)
+mod.spl3
+plot(share.of.debt~debt.gdp.ratio, 
+            data = datos)
+lines( mod.spl3, col="magenta" )
+
+lines( mod.spl2, col="red" )
+lines( mod.spl1, col="blue" )
+
+```
+
+Se puede observar que en el caso del parametro de suavizado más bajo, 0.5, linea rosa, el spline intenta seguir la mayor parte de los puntos por lo que estaríamos haciendo un "overfitting". En el caso del spar más alto, el obtenido por cross validation 1.4, línea roja, el spline intenta seguir la tendencia de los puntos siiendo practiamente recta, lo que nos daría un "underfitting". Finalmente el spar intermedio 0.8 da una grafica mas suave, que intenta seguir las tendencias de los puntos. El mayor problema que tenemos aqui es el punto que se devía muycho  en el share of debt, que hace que la spline tienda a subir en ese tramo para seguir a este punto. 
+
+En este caso hemos indicado solo el criterio de suavizado `spar` el resto de parametros son escogidos por r, se observa que al aumentar `spar` disminuye los hrados de libretad del modelo. Es decir, el modelo va a ser un poco más rigido y no se va a adaptar tanto a los puntos. 
+
+Vamos a hacer ahora el suavizado con splines de distintas maneras: Una spline cubica especificando los nodos y una spline natural
+
+```{r}
+library(splines)
+#spline sin especificar los nodos
+mod.spl4 <- lm(share.of.debt ~ bs(debt.gdp.ratio,degree=3),data=datos)
+summary(mod.spl4)
+
+
+```
+En este caso no se han especificado nodos, por lo tanto el modelo solo tiene los dos nodos extremos que serán el máximo y el mínimo de la variable explicativa:
+```{r}
+max(datos$debt.gdp.ratio)
+min(datos$debt.gdp.ratio)
+```
+
+Casi todos los coeficientes de la regresion son no significiativos, además el $R^2$ es muy bajo y el estadistico F tiene un pvalor que se puede considerar alto, con una cofianza del 2% se puede decir que hay coeficientes no significativos. 
+Se genera una predicción y los intervalos de confianza para graficar los datos con su intervalo de confianza
+
+```{r}
+rango <- range(datos$debt.gdp.ratio)
+npuntos <- seq(from = rango[1], to = rango[2], by = 10)
+npuntos <- data.frame(debt.gdp.ratio = npuntos)
+npredic_spl4  <- predict(mod.spl4, newdata = npuntos, se.fit = TRUE, level = 0.95)
+intconf <- data.frame(inferior = npredic_spl4$fit - 1.96*npredic_spl4$se.fit,
+                      superior = npredic_spl4$fit + 1.96*npredic_spl4$se.fit)
+```
+
+Y finalmente se dibujan los puntos originales con los puntos predichos y el intervalo de confianza.
+
+```{r}
+plot(datos$debt.gdp.ratio,datos$share.of.debt, ylim = c(-10,35))
+title("Spline cúbica")
+lines(npuntos$debt.gdp.ratio,npredic_spl4$fit, col = "red", lwd = 2)
+lines(npuntos$debt.gdp.ratio, intconf$inferior, col = "blue",
+      lwd = 2, lty = 2)
+lines(npuntos$debt.gdp.ratio, intconf$superior, col = "blue", 
+      lwd = 2, lty = 2)
+# lines( mod.spl4, col="red" )
+```
+
+En este caso se van a elegir los nodos con los quartiles de los datos para fijar los nodos en los puntos en los que tenemos un 25, 50 y 75 % de los datos. se han elegido 3 nodos, es decir 4+3 grados de libertad. Para elegir el mejor numeroo de grados de libertad habria que hacer un cross validation utilizando desde 4 hasta 4+numero de puntos del modelo, que serían los maximos. Por simplicidad se ha escogido este metodo.
+
+```{r}
+knots <- quantile(datos$debt.gdp.ratio, p = c(0.25, 0.5, 0.75))
+knots
+```
+Como vemos los cuartiles están desplazados hacia la izquierda que es donde más acumulación de datos se observan.
+
+```{r}
+mod.spl5 <- lm(share.of.debt ~ bs(debt.gdp.ratio,knots=knots, degree=3),data=datos)
+summary(mod.spl5)
+```
+
+
+```{r}
+rango <- range(datos$debt.gdp.ratio)
+npuntos <- seq(from = rango[1], to = rango[2], by = 10)
+npuntos <- data.frame(debt.gdp.ratio = npuntos,dummy1=0)
+npredic_spl5  <- predict(mod.spl5, newdata = npuntos, se.fit = TRUE, level = 0.95)
+intconf <- data.frame(inferior = npredic_spl5$fit - 1.96*npredic_spl5$se.fit,
+                      superior = npredic_spl5$fit + 1.96*npredic_spl5$se.fit)
+```
+
+Y finalmente se dibujan los puntos originales con los puntos predichos y el intervalo de confianza.
+
+```{r}
+plot(datos$debt.gdp.ratio,datos$share.of.debt, ylim = c(-10,35))
+title(paste("Spline cúbica, nodos:", knots[1],", ",knots[2],", ",knots[3]))
+lines(npuntos$debt.gdp.ratio,npredic_spl5$fit, col = "red", lwd = 2)
+lines(npuntos$debt.gdp.ratio, intconf$inferior, col = "blue",
+      lwd = 2, lty = 2)
+lines(npuntos$debt.gdp.ratio, intconf$superior, col = "blue", 
+      lwd = 2, lty = 2)
+
+
+```
+La curva sigue mejor los puntos del principio y tiene más flexibilidad al final para moverse, por eso mejora un poco el $R^2$. Al estar realizando regresiones que no son exactamente lineales analizamos admeás del valor del $R^2$ El valor de los pseudo- $R^2$, AIC y BIC para comparar los dos anteriores.
+
+```{r}
+library(rcompanion)
+nagelkerke( mod.spl4, restrictNobs = TRUE )
+nagelkerke( mod.spl5, restrictNobs = TRUE )
+
+compareLM(mod.spl4,mod.spl5)
+anova(mod.spl4,mod.spl5)
+```
+
+De estos resultados solo podemos inferir que según los pseudp-$R^2$ el modelo mejora ligeramente especificando los nodos con los quartiles. Pero el resto de estadisticos no muestran un cambio significativo que indique una mejora significativa en el modelo.
+
+
+Por ultimo vamos a usar las splines naturales:
+
+
+```{r}
+mod.spl8 <- lm(share.of.debt ~ ns(debt.gdp.ratio,knots=knots),data=datos)
+summary(mod.spl8)
+```
+
+```{r}
+rango <- range(datos$debt.gdp.ratio)
+npuntos <- seq(from = rango[1], to = rango[2], by = 10)
+npuntos <- data.frame(debt.gdp.ratio = npuntos)
+npredic_spl8  <- predict(mod.spl8, newdata = npuntos, se.fit = TRUE, level = 0.95)
+intconf <- data.frame(inferior = npredic_spl8$fit - 1.96*npredic_spl8$se.fit,
+                      superior = npredic_spl8$fit + 1.96*npredic_spl8$se.fit)
+```
+
+Y finalmente se dibujan los puntos originales con los puntos predichos y el intervalo de confianza.
+
+```{r}
+plot(datos$debt.gdp.ratio,datos$share.of.debt, ylim = c(-10,35))
+title(paste("Spline natural, nodos:", knots[1],", ",knots[2],", ",knots[3]))
+lines(npuntos$debt.gdp.ratio,npredic_spl8$fit, col = "red", lwd = 2)
+lines(npuntos$debt.gdp.ratio, intconf$inferior, col = "blue",
+      lwd = 2, lty = 2)
+lines(npuntos$debt.gdp.ratio, intconf$superior, col = "blue", 
+      lwd = 2, lty = 2)
+
+```
+Comparamos el valor de la mejor regresión anterior, que era el modelo de spline cubica con los nodos en los quartiles, con esta.
+
+```{r}
+anova(mod.spl5,mod.spl8)
+```
+
+Ocurre lo mismo que en las anteriores, vamos a analizar los residuos:
+
+```{r}
+plot(mod.spl5)
+```
+```{r}
+plot(cooks.distance(mod.spl5), bg='black', cex=1.2, ylab="Cook's distance", main = "mod1")
+```
+
+```{r}
+bptest(mod.spl5)
+shapiro.test(mod.spl5$residuals)
+```
+
+Se puede observar que en el mejor de todos los modelos anteriores, en cuanto a $R^2$ se refiere, tenemos problemas de normalidad de los residuos. Hay algunos valores con una distancia de Cook mayor que 0.5 que podrían estar causando problemas. Pero no se muestran problemas de heterocedasticidad. 
+
+```{r}
+mod.spl9 <- lm(share.of.debt ~ bs(debt.gdp.ratio,knots=knots, degree=3)+dummy_gdp,data=datos)
+summary(mod.spl9)
+nagelkerke( mod.spl9, restrictNobs = TRUE )
+#BIC
+BIC(mod.spl9)
+#AIC
+AIC(mod.spl9)
+#normalidad
+shapiro.test(mod.spl9$residuals)
+#valores extremos
+plot(cooks.distance(mod.spl9))
+
+```
+
+Añadiendo una variable dummy al modelo se mejoran los problemas de normalidad, el modelo se ajusta mejor a los datos, pero las distancias de Cook han aumentado por lo que no se han solucionado todos los problemas. 
+
+- Estime un modelo de regresión Modelo Aditivo Generalizado y discuta sobre cuál de todos los métodos que ha realizado en la práctica utilizaría para estimar la relación entre el porcentaje de deuda en los países de la OCDE y la tasa de deuda sobre el PIB.
+
+
+```{r}
+library( mgcv )
+mod.gam1<-mgcv::gam(share.of.debt ~ s(debt.gdp.ratio), family = gaussian (link = "identity"), data=datos)
+mod.gam2<-mgcv::gam(share.of.debt ~ s(debt.gdp.ratio)+dummy, family = gaussian (link = "identity"), data=datos)
+mod.gam3<-mgcv::gam(share.of.debt ~ s(debt.gdp.ratio)+dummy, family = gaussian (link = "inverse"), data=datos)
+mod.gam4<-mgcv::gam(share.of.debt ~ s(debt.gdp.ratio)+dummy, family = gaussian (link = "log"), data=datos)
+mod.gam5<-mgcv::gam(share.of.debt ~ s(debt.gdp.ratio)+dummy, family = Gamma (link = "identity"), data=datos)
+mod.gam6<-mgcv::gam(share.of.debt ~ s(debt.gdp.ratio)+dummy, family = Gamma (link = "inverse"), data=datos)
+mod.gam7<-mgcv::gam(share.of.debt ~ s(debt.gdp.ratio)+dummy, family = Gamma (link = "log"), data=datos)
+summary.gam(mod.gam1)
+summary.gam(mod.gam2)
+summary.gam(mod.gam3)
+summary.gam(mod.gam4)
+summary.gam(mod.gam5)
+summary.gam(mod.gam6)
+summary.gam(mod.gam7)
+AIC(mod.gam1,mod.gam2,mod.gam3,mod.gam4,mod.gam5,mod.gam6,mod.gam7)
+BIC(mod.gam1,mod.gam2,mod.gam3,mod.gam4,mod.gam5,mod.gam6,mod.gam7)
+
+```
+```{r}
+summary(mod.gam1)$r.sq
+summary(mod.gam2)$r.sq
+summary(mod.gam3)$r.sq
+summary(mod.gam4)$r.sq
+summary(mod.gam5)$r.sq
+summary(mod.gam6)$r.sq
+summary(mod.gam7)$r.sq
+```
+
+
+El modelo que mejor AIC (74) presenta es el mod.gam7, que considera los residuos con una función Gamma y como función de ligadura la identidad. Np hay mucha diferencia con el modelo mog.gam7 con un AIC de 76, el cual mejora en cuanto a la significación del modelo ya que explica un 82% de los valores. La mejora de usar una distribución gaussiana (normal) para los errores a utilizar una Gamma es notable.  Viendose que los modelos 5, 6 y 7 presentan una dismunición del AIC importante con respecto a los otros modelos.
+
+
+# Ejercicio 6
+- Los datos contenidos en el fichero avena.csv corresponden a las cosechas de tres variedades de avena (expresadas como 1/4 lb por sub-plot, cada uno de 1/80 acre). Hay seis bloques (I-VI) y cuatro tratamientos de fertilización con nitrógeno. [Fuente: Venables y Ripley (2002), pág. 282.]
+Establezca el diseño asociado a este experimento y estime los distintos efectos a través del correspondiente modelo lineal.
+
+Primero se exportan los datos del fichero y se mira su estructura:
+```{r}
+avena<-read.csv("avena.csv",sep = ";")
+head(avena)
+str(avena)
+summary(avena)
+```
+Vemos que todas las variables menos el rendimiento han sido tomadas como factores, por tanto no hay que hacer ninguna transformacion. Hay 3 tipos de variedades y 4 tratamientos y 12 datos por parcela, por lo que en cada parcela se prueban las 3 variedades con los 4 tratamientos.
+
+
+El valor a estimar es yield, que es el rendimiento. Dentro de las parcelas puede haber distintas variedades con distintos trataientos. 
+```{r}
+library(lattice)
+xyplot(yield ~ nitro | variety, data = avena, type = c("p", "r"))
+
+```
+
+```{r}
+xyplot(yield ~ nitro | block, data = avena, type = c("p", "r"))
+```
+Vemos como el valor del rendimiento aumenta con el tratamiento, independientemente de la variedad o de la parcela. 
+
+```{r}
+interaction.plot(avena$nitro,avena$variety,avena$yield,
+                 col = c("blue4", "red4", "black"),
+                 lty = c(1,2,3),  # line type
+                 lwd = 2,  # line width
+                 trace.label = "Variety",  # label for legend
+                 xpd = F)
+```
+
+```{r}
+interaction.plot(avena$nitro,avena$block,avena$yield,
+                 col = c("blue4", "red4", "black","blue4", "red4", "black"),
+                 lty = c(1,1,1,2,2,2),
+                 lwd = 2,  # line width
+                 trace.label = "Block",  # label for legend
+                 xpd = F)
+```
+```{r}
+boxplot(yield~nitro, data = avena)
+boxplot(yield~variety, data = avena)
+boxplot(yield~block, data = avena)
+```
+
+Tanto en los gráficos de bigotes como en los gráficos de interacción vemos como el tratamiento afecta al rendimiento, mientras que el tipo de trigo o el bloque no. También se observa un comportamiento significativamente mas alto en el bloque 1 que en el resto.
+
+Por tanto el efecto de la parcela está anidado en el efecto variedad y en el tratamiento. Por lo que habria que estimar el efecto del tratamiento en cada variedad como fatores fijos y el feactor parcela como aleatorio, porque las 4 contienen todas las variedades y los tratamientos. Por tanto tenemos que indicar la relación entre el tratamiento y la variedad y tomar como variabilidad la de la variedad sobre el bloque. 
+
+```{r}
+mod.avena <- aov(yield ~ nitro*variety+Error(variety/block), data = avena)
+summary(mod.avena)
+```
+
+Esta claro que el tratamiento tiene efectos, pero no vemos diferencias en las variedades o en los bloques.
+
+Hacemos un modelo split-plot con la función lmer que nos proporciona más infomación
+
+```{r}
+library(lme4)
+mod.split_plot <- lmer(yield ~ 1+ nitro*variety + (1| variety:block), data=avena)
+summary(mod.split_plot)
+```
+
+
+Hemos visto como el tratamiento afecta al rendimiento, pero tenemos que saber que ocurre con el resto de variables:
+
+
+ Groups          Variance     Std.Dev.
+ variety:block   320.5        17.90   
+ Residual        177.1        13.31   
+
+
+Si hacemos porcentajes de la varianza, el 64.4% de la variaza no explicada es debido al efecto aleatorio del bloque. Habría que aumentar el numero de bloques.
+
+EL efecto de interacción entre variedad y tratamiento tampoco es significativo. Ni entre bloques por lo que habría que eliminarlos del modelo. 
+
+```{r}
+library(nlme)
+mod.split_plot2 <- aov(yield ~ nitro+block, data=avena)
+summary(mod.split_plot2)
+
+library(lme4)
+mod.split_plot3 <- lm(yield ~nitro+block, data=avena,method="forward")
+summary(mod.split_plot3)
+
+```
+
+Vemos como en un modelo lineal teniendo en cuenta el tratamiento y el bloque, todos los coeficientes son significativos y explican el modelo a un 65%.
+
+# Ejercicio 7
+- El data frame UCBAdmissions del paquete datasets contiene datos agregados sobre los solicitantes a la escuela de posgrado en Berkeley para los seis departamentos más grandes en 1973 clasificados por admisión y sexo.
+El objetivo del estudio es determinar si existe discriminación contra las mujeres en este tipo de ámbitos, y, por tanto, interesa conocer el efecto de la variable Gender en la probabilidad de resultar admitido. Estime, para ello, un modelo de regresión logística. 
+Nota: especificar la frecuencia a través del parámetro weights. ___
+
+
+```{r}
+library(datasets)
+ucba <- data.frame(UCBAdmissions)
+str(ucba)
+head(ucba)
+```
+
+Tenemos datos de la admisión, del sexo y del departamento, y cuantos de cada uno cumplen esto. Primero se muestran las proporciones de aceptados por sexo:
+
+```{r}
+xyplot(Freq ~ Gender | Admit, data = ucba, type = c("p", "r"))
+total_wom_admit<-sum(subset(ucba, ucba$Gender=="Female" & ucba$Admit=="Admitted")$Freq)
+total_wom_admit
+sol_wom<-sum(subset(ucba,ucba$Gender=="Female")$Freq)
+sol_wom
+freq_man_admit<-
+total_man_admit<-sum(subset(ucba, ucba$Gender=="Male" & ucba$Admit=="Admitted")$Freq)
+total_man_admit
+sol_man<-sum(subset(ucba,ucba$Gender=="Male")$Freq)
+sol_man
+
+
+total_solicitudes<-sum(ucba$Freq)
+total_solicitudes
+admitidos <- c(total_man_admit,total_wom_admit)
+
+#porcentaje de mujeres admitidas según solidictudes
+total_wom_admit/sol_wom
+total_man_admit/sol_man
+prop.table(admitidos)
+
+admitidos/total_solicitudes
+```
+
+Se observa que de los admitidos un 68% son hombres y un 32% mujeres, por lo que puede llevar a pensar que hay discriminación a la hora de admitir alumnos. 
+
+Si lo vemos según el total de las solicitudes, un 26% de hombres fueron admitios y in 12% de mujeres. Y según las solicitudes de cada grupo, un 30% de las mujeres que solicitaron el acceso fueron admitidas y un 44% de los hombres que solicitaron acceso fueron admitidos. Por lo tanto parece que hay un sesgo a la hora de admitir alumnos, pero viendo el procentaje de admitidos por solicitud de cada grupo esos valores no se alejan tanto.
+
+Otro dato que habría que analizar es el de los admitidos por departamento. Se seleccionan solo los admitidos, puesto que es lo que queremos estudiar:
+
+```{r}
+ucba_Admited<-subset(ucba, ucba$Admit=="Admitted")
+
+xyplot(Freq ~ Gender | Dept, data = ucba_Admited, type = c("p", "r"))
+ucba_Admited
+```
+
+Aquí observamos que 3 de los departamentos, D, E y F, tienen aproximadamente el mismo número de hombres que de mujeres, sin embargo en los departamentos A y B hay un claro aumento del número de hombres y al contrario en el C. 
+
+Para poder analizar bien estos resultados se proponen dos modelos, uno que no incluye el efecto del departamento y otro que sí.
+
+Para poder analizar bien los resultados hay que tener en cuenta que Admit esta codificado como 1 para admitidos y 2 para rechazados, en este caso la funcion glm tomará como mejor los datos codificados como 2 por lo tanto hay que recodificarlo:
+
+```{r}
+ucba$Admit<-ifelse(ucba$Admit=="Admitted",1,0)
+```
+
+
+```{r}
+
+ucba<-ucba[order(ucba$Gender),]
+mod.glm <- glm(Admit ~ Gender,  weights = Freq, data = ucba, binomial(link="logit"))
+summary(mod.glm)
+exp(coef(mod.glm))
+```
+
+La probabilidad de ser escogida como mujer es de 0.54, lo que quiere decir que la probabilidad de que una mujer sea admitida es la mitad que la de un hombre.
+
+Se puede ver como el efecto del genero tiene un efecto significativo en las admisiones si solo se tiene en cuenta eso. En el caso de incluir el departamento en la regresión, los resultados cambian:
+
+
+```{r}
+mod.glm2 <- glm(Admit ~ Gender+Dept,  weights = Freq,data = ucba, binomial(link="logit"))
+summary(mod.glm2)
+exp(coef(mod.glm2))
+```
+
+En este caso se observa que el efecto del género ya no es significativo y si lo es el departamento. Y que este comportamiento se da la vuelta, siendo ahora más probable la admisión de mujeres dependiendo del departamento. Por tanto que pasa en cada departamento?
+
+```{r}
+ucba_depA <- subset(ucba, ucba$Dept=="A")
+mod.glm3 <- glm(Admit ~ Gender,  weights = Freq,data = ucba_depA, binomial(link="logit"))
+summary(mod.glm3)
+exp(coef(mod.glm3))
+```
+
+En este caso vemos como la probabilidad de admitir a una mujer en el departamento A es mas alta que la de admitir un hombre.
+
+```{r}
+ucba_depE <- subset(ucba, ucba$Dept=="E")
+mod.glm4 <- glm(Admit ~ Gender,  weights = Freq,data = ucba_depE, binomial(link="logit"))
+summary(mod.glm4)
+exp(coef(mod.glm4))
+```
+
+Sin embargo en el departamento E es más probable que se admita un hombre.
+ 
+- ¿Se puede concluir que hay discriminación?
+
+En este caso no se puede concluir que haya discriminacion, esa diferencia puede deberse a las caracteristicas de los aplicantes en ese año específico, para poder sacar conclusiones mas determinadas se podría contar con más información acerca de los aplicantes, es decir, notas de admisión, o en lugar de hacerlo solo por año estudiar los datos en un espacio de tiempo, y ver si en ese espacio, se ha seguido una tendencia clara a la admisión de más hombres que mujeres.
+

@@ -1,0 +1,1022 @@
+---
+title: "Evaluación módulo 5"
+author: "Bárbara Bellón Lara"
+date: "09/06/2020"
+output: 
+    html_document:
+      highlight: tango
+      theme: paper
+      toc: true
+      toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,fig.width=6, fig.height=5,fig.align = "center", warning = F, message = F)
+```
+## Evaluación Minería de Datos I
+
+El objetivo general de esta prueba de evaluación consiste en analizar el comportamiento del comprador en línea en tiempo real. Para ello, se testarán diferentes métodos y algoritmos y se deberá seleccionar aquel o aquellos métodos que sean más óptimos de cara a predecir la intención de compra del visitante.
+
+Al final del documento se indican las dificultades y las dudas que han surgido a la hora de realizar el trabajo.
+
+
+## Carga de paquetes
+
+Primero se cargan los paquetes necesarios
+
+
+```{r message=FALSE}
+rm(list = ls()) 
+library(caret)
+library(corrplot)
+library(gmodels)
+library(ggplot2)
+library(doParallel)
+library(ROCR)
+library(party)
+library(rpart)
+library(randomForest)
+library(C50)
+library(CHAID)
+library(gbm)
+library(pROC)
+library(psych)
+library(rpart.plot)
+library(plyr)
+library(questionr)
+library(mice)
+library(tidyverse)
+library(questionr)
+library(psych)
+library(car)
+library(corrplot)
+library(sampling)
+library(rattle)
+library(knitr)
+library(formattable) 
+library(kableExtra) 
+library(rmarkdown)
+library(pander)
+source("https://raw.githubusercontent.com/briatte/ggcorr/master/ggcorr.R")
+```
+
+## Importación y lectura de los datos
+
+
+
+```{r }
+#working directory
+path<-"C:/Users/Barbara/Dropbox/EvaluacionM5"
+setwd(path)
+
+#lectura de datos
+archivos<-dir(path = path, pattern = "online*", all.files = T)
+
+datos <- read.csv(archivos)
+```
+
+
+
+## Exploración de la base de datos
+
+```{r }
+#Estructura
+str(datos)
+# Cuento el número de valores diferentes para las numéricas
+sapply(Filter(is.numeric, datos),function(x) length(unique(x)))
+```
+
+
+Las variables con pocos valores únicos pueden convertirse a factores, como por ejemplo `OperatingSystems`, `Browser`, `Region` and `TrafficType`.
+
+```{r }
+#convertimos todos los valores subceptibles de ser factores
+datos[,c(10:17)] <- lapply(datos[,c(10:17)], factor)
+```
+
+Buscamos si hay valores missing en las variables
+```{r}
+summary(datos)
+sum(is.na(datos))
+```
+
+No se observa ningún valor missing, por lo que no hay que realizar ninguna imputación.
+
+
+Las variables de tipo booleano se convierten a binarias y factores
+```{r }
+datos$Weekend<-as.factor(ifelse(datos$Weekend==FALSE,0,1))
+
+datos$Revenue<-as.factor(ifelse(datos$Revenue==TRUE,"y","n"))
+
+```
+
+
+
+### Gráficos
+
+```{r }
+#función para graficar de manera rápida todas las variables, para ver su estructura principal
+dfplot <- function(data.frame){
+  df <- data.frame
+  ln <- length(names(data.frame))
+  for(i in 1:ln){
+    if(is.factor(df[,i])){
+      plot(df[,i],main=names(df)[i])}
+    else{hist(df[,i],main=names(df)[i])
+      boxplot(df[,i],main=names(df)[i])}
+  }
+}
+
+par(mfrow=c(2,3))
+dfplot(datos)
+```
+
+En las variables continuas hay gran parte de outliers, en este caso las distribuciones son lognormales, por lo que los test de outliers normales no serían aplicables.
+
+Con respecto a las variables categóricas se observa que hay muchas categorías que estan muy poco representadas, podrían recodificarse. 
+
+Por último Revenue, que es la variable objetivo, no esta balanceada, vamos a ver las proporciones:
+
+```{r}
+CrossTable(datos$Revenue)
+```
+
+La proporción de sesiones en las que no se compra ningún artículo es muy superior a las de compra, para realizar un análisis correcto habría que balancear la base de datos para no favorecer la clase más representada.
+
+
+##### Análisis de las variables continuas
+
+
+```{r }
+ggplot(datos, aes(x=Administrative))+
+geom_density(aes(color=Revenue,fill=Revenue),alpha=0.5)
+
+ggplot(datos, aes(x=Administrative_Duration, fill=Revenue))+
+  geom_density(aes(color=Revenue,fill=Revenue),alpha=0.5)
+
+ggplot(datos, aes(x=Informational))+
+  geom_density(aes(color=Revenue,fill=Revenue),alpha=0.5)
+
+ggplot(datos, aes(x=Informational_Duration, fill=Revenue))+
+  geom_density(aes(color=Revenue,fill=Revenue),alpha=0.5)
+
+ggplot(datos, aes(x=ProductRelated))+
+  geom_density(aes(color=Revenue,fill=Revenue),alpha=0.5)
+
+ggplot(datos, aes(x=ProductRelated_Duration, fill=Revenue))+
+  geom_density(aes(color=Revenue,fill=Revenue),alpha=0.5)
+
+ggplot(datos, aes(x=BounceRates))+
+  geom_density(aes(color=Revenue,fill=Revenue),alpha=0.5)
+
+ggplot(datos, aes(x=ExitRates, fill=Revenue))+
+  geom_density(aes(color=Revenue,fill=Revenue),alpha=0.5)
+
+ggplot(datos, aes(x=PageValues, fill=Revenue))+
+  geom_histogram(aes(color=Revenue,fill=Revenue),alpha=0.5)
+
+featurePlot(x = datos[, 1:7], 
+            y = datos$Revenue, 
+            plot = "box",
+            strip=strip.custom(par.strip.text=list(cex=.7)),
+            scales = list(x = list(relation="free"), 
+                          y = list(relation="free")))
+```
+
+Como las clases no están balanceadas, se han representado las densidades en lugar de los histogramas, en general las distribuciones de las compras que se hacen efectivas son más amplias, queriendo decir que pasan mas tiempo en las webs por sesión. Se observa que el exit rate promedio para las transacciones que terminan en compra esta concentrado en valores más bajos al igual que bounce rate. Sin embargo esto no es fácil de analizar ya que estas tasas se suelen medir por página y aquí estamos midiendo por sesión.
+
+
+##### Análisis de las variables categóricas
+
+```{r }
+#Porcentaje por meses
+porc<-as.data.frame(prop.table(table(datos$Month,datos$Revenue),2))
+porc
+
+ggplot(porc, aes(x=Var1,y=Freq,fill=Var2))+
+  geom_bar(stat = "identity")+
+  xlab("Month")
+```
+
+Los meses que más porcentaje tanto de compras como de visitas a la web son noviembre, mayo, diciembre y marzo, en ese orden. 
+
+
+- Cómo afectan el sistema operativo, el navegador, la region o el tipo de tráfico a las compras?
+
+**Sistema operativo**
+
+```{r }
+
+porc<-as.data.frame(prop.table(table(datos$OperatingSystems,datos$Revenue),2))
+
+ggplot(porc, aes(x=Var1,y=Freq,fill=Var2))+
+  geom_bar(stat = "identity")+
+  xlab("OS")
+```
+
+En el gráfico vemos con los sistemas opertivos ms usdos son el 2, y el 1 y 3. Sin embrgo, aqí no podemos ver bien la influencia de cada uno.
+
+```{r }
+prop.table(table(datos$OperatingSystems,datos$Revenue),1)
+CrossTable(datos$OperatingSystems,datos$Revenue)
+```
+
+es estas dos tblas se puede ver como el porcentaje de compras no varía demasiado dependiendo del sistema opertivo utilizado. También vemos como hay variables con poca representacion, como por ejemplo del sistema operativo 5 al 8.
+
+
+**Navegador**
+
+```{r }
+porc<-as.data.frame(prop.table(table(datos$Browser,datos$Revenue),2))
+
+ggplot(porc, aes(x=Var1,y=Freq,fill=Var2))+
+  geom_bar(stat = "identity")+
+  xlab("Browser")
+```
+
+Los navegadores más usados son el 2 y el 1, hay diferencias en las compras entre ellos?
+
+```{r }
+prop.table(table(datos$Browser,datos$Revenue),1)
+CrossTable(datos$Browser,datos$Revenue)
+```
+
+vemos que no, que el porcentaje de compras entre el 12 y 19% , los datos atípicos, como del 100%, son debidos a un solo usurio usando ese navegdor o a muy pocos usuarios.
+
+
+**Región**
+```{r }
+#porcentaje region
+porc<-as.data.frame(prop.table(table(datos$Region,datos$Revenue),2))
+porc
+
+ggplot(porc, aes(x=Var1,y=Freq,fill=Var2))+
+  geom_bar(stat = "identity")+
+  xlab("Region")
+prop.table(table(datos$Region,datos$Revenue),1)
+CrossTable(datos$Region,datos$Revenue)
+
+#porcentaje Tipo trafico
+porc<-as.data.frame(prop.table(table(datos$TrafficType,datos$Revenue),2))
+porc
+
+ggplot(porc, aes(x=Var1,y=Freq,fill=Var2))+
+  geom_bar(stat = "identity")+
+  xlab("Traffic Type")
+prop.table(table(datos$TrafficType,datos$Revenue),1)
+CrossTable(datos$TrafficType,datos$Revenue)
+```
+
+En la región las diferencias entre regiones son pequeñas, sin embargo en tipo de tráfico hay más variabilidad. 
+
+**Tipo de visitante**
+
+```{r }
+porc<-as.data.frame(prop.table(table(datos$VisitorType,datos$Revenue),2))
+
+ggplot(porc, aes(x=Var1,y=Freq,fill=Var2))+
+  geom_bar(stat = "identity")+
+  xlab("Visitor Type")
+```
+
+Se puede observar como la mayor parte de los visitantes son returning_visitors, nuevos hay muy pocos y
+otros no sabemos a que se pueden deber, por tanto podrían recodificrse en Nuevos? 
+
+```{r }
+prop.table(table(datos$VisitorType,datos$Revenue),1)
+CrossTable(datos$VisitorType,datos$Revenue)
+```
+
+en este caso el mayor porcentaje de compras lo hacen los nuevos visitantes.
+
+**Fin de semana**
+```{r }
+porc<-as.data.frame(prop.table(table(datos$Weekend,datos$Revenue),2))
+
+
+ggplot(porc, aes(x=Var1,y=Freq,fill=Var2))+
+  geom_bar(stat = "identity")+
+  xlab("Fin de semana")
+prop.table(table(datos$Weekend,datos$Revenue),1)
+CrossTable(datos$Weekend,datos$Revenue)
+```
+
+El porcentaje de compras los fines de semana es ligeramente superior a los de los de entre semana
+
+
+**Días especiales**
+
+```{r }
+porc<-as.data.frame(prop.table(table(datos$SpecialDay,datos$Revenue),2))
+
+ggplot(porc, aes(x=Var1,y=Freq,fill=Var2))+
+  geom_bar(stat = "identity")+
+  xlab("SpeciaDay")
+prop.table(table(datos$SpecialDay,datos$Revenue),1)
+CrossTable(datos$SpecialDay,datos$Revenue) 
+```
+
+El porcentaje de compras cerca de los días especiales es de un 10%, el porcentaje de compras lejos es de un 16%, sin embargo hay que tener en cuenta que el numero de compras que hacen cuando no hay un dia especial es mucho mayor
+
+
+
+
+
+#### Análisis de correlación entre las variables continuas
+correlaciones entre variables
+
+```{r }
+correl <- cor(datos[,-c(10:20)])
+correl
+ggcorr(datos[,-c(10:20)], label = TRUE, hjust = 0.75,palette = "RdYlBu",label_round = 2,label_alpha = T) 
+```
+
+Vemos como las variables Administrative, Informational, ProductRelated están bastante correlacionadas con 
+la duración de las mismas (0.6, 0.62 y 0.86, respectivamente), así como BounceRatesy ExitRates están muy
+correlacionadas, 0.91. Con esta matriz de correlación no tiene sentido hacer factores o componentes
+principales, ya que con las demás variables se muestra poca correlación. Se van a eliminar las variables `BounceRates` y `ProductRelated`al considerarse redundantes.
+
+
+## Balanceado
+
+Para hacer el método del cubo se necesitan seleccionar las variables más iomportantes
+
+```{r}
+
+datos<-datos[,-c(5,7)]
+
+```
+
+
+
+ 
+Se ha intentado hacer el método del cubo para balancear la base de datos, pero incluso incluyendo solo una de las variables continuas no lo hace. Por lo tanto se realiza con SMOTE.
+```{r eval=F}
+library(DMwR)
+set.seed(7)
+datos_balanc_Smote<-SMOTE(Revenue~.,datos,perc.over = 6, perc.under = 2500,k=5)
+```
+
+ 
+
+```{r eval=F}
+write.table(datos_balanc_Smote, "balanceados_smote.csv", sep=";",
+                      col.names=TRUE, row.names=FALSE, quote=TRUE, na="NA")
+saveRDS(datos_balanc_Smote,file=paste(path,"/","smote.Rdata",sep=""))
+```
+
+## Evaluación de modelos
+
+Se carga la muestra balanceada
+```{r}
+#carga la muestra balanceada
+datos_balanc_Smote<-readRDS("smote.Rdata")
+CrossTable(datos$Revenue)
+CrossTable(datos_balanc_Smote$Revenue)
+#se escalan las variables continuas
+datos_balanc_Smote[,c(1:7)]<-scale(datos_balanc_Smote[,c(1:7)],scale = T,center = T)
+
+
+#Generamos el 80% de la base de datos para muestra de entrenamiento
+set.seed(7)
+
+validation_index <- createDataPartition(datos_balanc_Smote$Revenue, p=0.80, list=FALSE)
+validacion <- datos_balanc_Smote[-validation_index,]
+entrenamiento<- datos_balanc_Smote[validation_index,]
+```
+
+### Funciones 
+
+Función para guardar el modelo
+```{r}
+##FUNCIONES UTILIZADAS
+
+save_model<-function(modelo){
+  #==========================================#
+  ### Función para salvar los modelos
+  #==========================================#
+  name<-paste(path,"/",deparse(substitute(modelo)),".Rdata",sep="")
+  print(name)
+  saveRDS(modelo,file= name)
+}
+```
+
+Función que muestra unicamente el mejor modelo
+```{r}
+mejor_modelo<-function(modelo){
+  print(paste("Mejor modelo:"))
+  print(modelo$bestTune)
+  print(modelo$finalModel)
+  print(paste(c("ROC del modelo con el fichero de validación:"), auc(curvaROC_val)))
+}
+```
+
+Función de resumen de evaluación de los modelos
+```{r}
+
+Resul_Modelo <- function( modelo ){
+  #==========================================#
+  ### Función para evaluación de modelos
+  ## Se han añadido el AUC a las curvas de train y test
+  #==========================================#
+  # Cálculos
+  # Curvas ROC
+  name <- paste("roc_",deparse(substitute(modelo)),sep="")
+  
+  pred_prob_ent <- predict(modelo, entrenamiento, type="prob")
+  pred_prob_val <- predict(modelo, validacion, type="prob")
+  curvaROC_ent <- roc(entrenamiento$Revenue,pred_prob_ent[,"y"])
+  curvaROC_val <- roc(validacion$Revenue,pred_prob_val[,"y"])
+  
+  # Predicciones del modelo
+  pred_Y <- predict(modelo, validacion, type="raw")
+  
+  # Resultados generales
+  #print(modelo$results)
+  print(paste("Mejor modelo:"))
+  print(modelo$bestTune)
+  #print(kable(modelo$finalModel))
+  print(paste(c("ROC del modelo con el fichero de validación:"), auc(curvaROC_val)))
+  
+  # Gráfico de curvas ROC
+  if (modelo$method == "rf" | modelo$method == "adaboost"){
+    plot(curvaROC_val,col="red", print.auc=TRUE,main=paste("Simulación con la curva ROC del modelo",deparse(substitute(modelo))))
+    legend("bottomright", legend = c("Validacion"), col = c("red"), lwd = 2)
+  }else{
+    plot(curvaROC_ent,col="blue", main=paste("Simulación con la curva ROC del modelo",deparse(substitute(modelo))))
+    plot(curvaROC_val, print.auc=TRUE,col="red", add=TRUE)
+    text(0.5, 0.7,  paste("AUC: ",round(auc(curvaROC_ent),3)),
+         cex=1, col="blue")
+    legend("bottomright", legend = c("Entrenamiento", "Validacion"), col = c("blue", "red"), lwd = 2)
+  }
+  
+  # Tabla de confusiÃ³n e importancia de las variables
+  confusionm<-confusionMatrix(modelo)
+  print(confusionm)
+  print(CrossTable(pred_Y, validacion$Revenue, prop.chisq = TRUE, prop.c = TRUE, prop.r = TRUE))
+  V<-varImp(modelo)
+  V
+  print(plot(V,top=15, main=paste("Importancia de las variables del modelo ", deparse(substitute(modelo)))))
+  return(curvaROC_val)
+}
+```
+
+
+Tabla comparativa de modelos
+
+```{r}
+Result <- function ( modelos ){
+  #==========================================#
+  ### Función para evaluación de modelos
+  ## Se sacan todas las métrica, se ha 
+  ## modificado para que los resultados sean
+  ## numéricos y redondeados a la 3 cifra.
+  #==========================================#
+  n_modelos = length(modelos)
+  comparativa <- matrix(0, n_modelos, 7)
+  pred <- NULL
+
+  for (i in 1:n_modelos){
+    pred[[i]] <- predict(modelos[i], validacion, type="prob")
+    comparativa[i,1] = modelos[[i]]$method
+    if (modelos[[i]]$method == "treebag"){
+       comparativa[i,2] = "-"
+       comparativa[i,3] = "-"
+       comparativa[i,4] = "-"
+       comparativa[i,5] = modelos[[i]]$results$Accuracy
+       comparativa[i,6] = modelos[[i]]$results$Kappa
+    }else{
+       comparativa[i,2] = round(as.numeric(modelos[[i]]$results[rownames(modelos[[i]]$bestTune), c("ROC")]), digits = 3)
+       comparativa[i,3] = round(as.numeric(modelos[[i]]$results[rownames(modelos[[i]]$bestTune), c("Sens")]), digits = 3)
+       comparativa[i,4] = round(as.numeric(modelos[[i]]$results[rownames(modelos[[i]]$bestTune), c("Spec")]), digits = 3)
+       comparativa[i,5] = round(as.numeric(modelos[[i]]$results[rownames(modelos[[i]]$bestTune), c("Accuracy")]), digits = 3)
+       comparativa[i,6] = round(as.numeric(modelos[[i]]$results[rownames(modelos[[i]]$bestTune), c("Kappa")]), digits = 3)
+    }
+    comparativa[i,7] = round(as.numeric(auc(roc(validacion$Revenue,pred[[i]][[1]][,"y"]))), digits = 3)
+  }
+  colnames(comparativa) <- c("Modelo", "ROC", "Sens", "Spec", "Accuracy", "Kappa", "ROC Validación")
+  return(comparativa)
+}
+```
+
+
+Función que agrega curvas ROC
+
+```{r}
+CurvasROC <- function( modelos ){
+    #==========================================#
+  ### Función graficar todas las curvas ROC juntas.
+  #==========================================#
+  n_modelos = length(modelos)
+  pred <- NULL
+  nombresModelos <- NULL
+  colores <- NULL
+  
+  pred[[1]] <- predict(modelos[1], validacion, type="prob")
+
+  # Colores para cada modelo generados de forma aleatoria
+  colores <- palette("Tableau 10")
+
+  plot ( roc(validacion$Revenue,pred[[1]][[1]][,"y"]), col = colores[1], main="Curvas ROC de todos los modelos" )
+
+  for( j in 1:length(modelos))
+  {
+    nombresModelos[j] <- modelos[[j]]$method
+  }
+  
+  legend("bottomright", legend = nombresModelos, col = colores, lwd = 2)
+         
+  for (i in 2:n_modelos){
+    pred[[i]] <- predict(modelos[i], validacion, type="prob")
+    plot ( roc(validacion$Revenue,pred[[i]][[1]][,"y"]), col = colores[i], add=TRUE )
+  }
+}
+```
+
+
+### Hiperparámetros de caret para clasificación
+
+```{r}
+
+fiveStats = function(...) c (twoClassSummary(...), defaultSummary(...))
+control <- trainControl(method = "repeatedcv", 
+                        number = 5,
+                        repeats = 3, 
+                        classProbs = TRUE, 
+                        summaryFunction = fiveStats,
+                        returnResamp = "final",
+                        allowParallel = TRUE)
+metrica <- "ROC"
+```
+
+### Entrenamiento de modelos
+
+En este apartado se van a presentar los modelos sin evaluarlos. 
+
+- **Regresión logística**, al ser la más sencilla de todos los métodos se incluye por si se da la paradoja de simpson
+```{r eval=F}
+#Regresión glm
+set.seed(7)
+t<-Sys.time()
+glm <- train( Revenue~ ., data = entrenamiento, 
+              method = "glm",  
+              metric = metrica,
+              trControl = control)
+Sys.time()-t
+save_model(glm)
+```
+```{r}
+glm<-readRDS("glm.Rdata")
+```
+
+- **Redes neuronales**: Se han escogido entre 1 y 10 neuronas en la capa oculta para ver cual funciona mejor.
+
+```{r eval=FALSE}
+#MPL
+mlpGrid <-  expand.grid(size = 1:10)
+clusterCPU <- makePSOCKcluster(detectCores()-1)
+registerDoParallel(clusterCPU)
+t<-Sys.time()
+mlp <- train(Revenue ~ ., data = entrenamiento, 
+              method = "mlp", 
+              metric = metrica, 
+              trControl = control,
+              tuneGrid = mlpGrid)
+Sys.time()-t #Time difference of 50.85018 secs
+stopCluster(clusterCPU)
+save_model(mlp)
+```
+```{r message=F}
+set.seed(7)
+mlp<-readRDS("mlp.Rdata")
+ggplot(mlp, highlight = TRUE) +
+  scale_x_continuous(breaks = c(1:10)) +
+  labs(title = "Evolución del ROC del modelo MLP", x = "K")
+#prediccion
+prediccion_mlp<- predict(mlp,validacion)
+prediccion_mlp <- factor(prediccion_mlp)
+#vemos si hay discordancias entre las métricas que puedan indicar over o under fitting
+mlp$bestTune
+paged_table(mlp$results[which(mlp$results[,1]==1) ,])
+confusionMatrix(data = prediccion_mlp, reference = validacion$Revenue)
+```
+
+Se selecciona el modelo con 1 neurona en la capa oculta.
+
+- **Máquinas vectores de soporte**: se realiza un grid con 10 valores para C y 10 para $\sigma$, siendo C el coste de la mala clasificación, es decir cuanto más alto, menos sesgo se va a producir y obtendremos una construcción más fina de los margenes blandos en el hiperplano. $\sigma$ es la varianza de la función kernel, es decir a menos varianza mas acotado estará el kernel.
+
+```{r eval=F}
+# Ajuste del modelo MÃ¡quinas de vector soporte
+set.seed(7)
+svmGrid <-  expand.grid(sigma = 1:10/400,
+                        C = 1:10/10)
+clusterCPU <- makePSOCKcluster(detectCores()-1)
+registerDoParallel(clusterCPU)
+t<-Sys.time()
+svm <- train(Revenue ~ ., data = entrenamiento, 
+              method = "svmRadial", 
+              metric = metrica, 
+              trControl = control,
+              tuneGrid = svmGrid)
+Sys.time()-t Time difference of 20.36319 mins
+stopCluster(clusterCPU)
+save_model(svm)
+```
+```{r message=F}
+set.seed(7)
+svm<-readRDS("svm.Rdata")
+ggplot(svm, highlight = TRUE) +
+  labs(title = "Evolución del ROC del modelo SVM")
+#prediccion
+prediccion_svm<- predict(svm,validacion)
+prediccion_svm <- factor(prediccion_svm)
+#vemos si hay discordancias entre las métricas que puedan indicar over o under fitting
+svm$bestTune
+paged_table(svm$results[which(svm$results[,1]==0.0125 & svm$results[,2]==1),])
+confusionMatrix(data = prediccion_svm, reference = validacion$Revenue)
+```
+
+Se observa que cuanto mayor el coste, mejor definidos están los hiperplanos, pero hay que tener en cuenta que al hacer esto podemos sobreajustat el modelo. En cuanto a sigma es la escala de la varianza, si aumentamos el valor de sigma significa que aumentamos la varianza de la función radial y por tanto más puntos serán tenidos en cuenta. A partir de los resultados de esta primera iteración se selecciona sigma=0.0125 y C=1. No observamos overfiting al estar las métricas de los sets de entrenamiento y validación muy similares
+
+
+- **Modelo k vecinos**: se eligen primero de 10 a 200 vecinos de 10 en 10.
+
+```{r eval=F}
+# Ajuste del modelo k - Vecinos
+knnGrid <-  expand.grid(k = seq(10,200,10))
+clusterCPU <- makePSOCKcluster(detectCores()-1)
+registerDoParallel(clusterCPU)
+t<-Sys.time()
+knn <- train(Revenue ~ ., data = entrenamiento, 
+              method = "knn", 
+              metric = metrica, 
+              trControl = control,
+              tuneGrid = knnGrid)
+Sys.time()-t #Time difference of 48.9408 secs
+stopCluster(clusterCPU)
+save_model(knn)
+```
+```{r}
+set.seed(7)
+knn<-readRDS("knn.Rdata")
+ggplot(knn, highlight = TRUE) +
+  labs(title = "Evolución del ROC del modelo KNN", x = "K")
+knn$finalModel
+
+
+```
+
+Se observa que el maximo esta alrededor de 60 vecinos, vamos a hacer otra iteración en este modelo.
+
+```{r eval=F}
+knnGrid <-  expand.grid(k = seq(40,120,10))
+clusterCPU <- makePSOCKcluster(detectCores()-1)
+registerDoParallel(clusterCPU)
+t<-Sys.time()
+knn2 <- train(Revenue ~ ., data = entrenamiento, 
+              method = "knn", 
+              metric = metrica, 
+              trControl = control,
+              tuneGrid = knnGrid)
+Sys.time()-t #Time difference of 20.54173 secs
+stopCluster(clusterCPU)
+save_model(knn2)
+```
+```{r message=F}
+set.seed(7)
+knn2<-readRDS("knn2.Rdata")
+ggplot(knn2, highlight = TRUE) +
+  labs(title = "Evolución del ROC del modelo KNN", x = "K")
+#prediccion
+prediccion_knn<- predict(knn2,validacion)
+prediccion_knn <- factor(prediccion_knn)
+#vemos si hay discordancias entre las métricas que puedan indicar over o under fitting
+knn$bestTune
+paged_table(knn$results[which(knn$results[,1]==50),])
+confusionMatrix(data = prediccion_knn, reference = validacion$Revenue)
+```
+
+Se selecciona el modelo con 100 vecinos y se observa que las metricas estan balanceadas.
+
+- **Adaboost**: Se pruebas dos métodos en adaboost con iteraciones de 1 a 400
+
+```{r eval=F}
+boostGrid <-  expand.grid(nIter = 1:10*40, method = c("Adaboost.M1", "Realadaboost"))
+clusterCPU <- makePSOCKcluster(detectCores()-1)
+registerDoParallel(clusterCPU)
+t<-Sys.time()
+boost <- train(Revenue ~ ., data = entrenamiento, 
+                  method = "adaboost", 
+                  metric = metrica, 
+                  trControl = control,
+                  tuneGrid = boostGrid)
+Sys.time()-t #Time difference of 2.021528 hours
+stopCluster(clusterCPU)
+save_model(boost)
+
+```
+```{r message=F}
+set.seed(7)
+boost<-readRDS("boost.Rdata")
+ggplot(boost, highlight = TRUE) +
+  labs(title = "Evolución del ROC del modelo Adaboost", x = "K")
+#prediccion
+prediccion_boost<- predict(boost,validacion)
+prediccion_boost <- factor(prediccion_boost)
+#vemos si hay discordancias entre las métricas que puedan indicar over o under fitting
+boost$bestTune
+paged_table(boost$results[which(boost$results[,1]==240),])
+confusionMatrix(data = prediccion_boost, reference = validacion$Revenue)
+```
+
+Claramente Adaboost.M1 presenta un mejor rendimiento que ReadAdadboost. No se observan grandes diferencias entre los distitos modelos probados por adaboost.M1, el mejor modelo viene dado por 300 iteraciones, aunque se podrían usar menos ya que las diferencias son mínimas. En estos modelos asignan un peso a cada conjunto de entrenamiento, y al iterar se minimizan los pesos de los conjuntos clasificados erroneamente. En adaboost se tienen particiones del numero de entrenamiento e iteraciones sobre estos. Este es uno de los algoritmos que más ha tardado pero que mejor resultados ha proporcionado. Las métricas coinciden para las muestras de entrenamiento y validación.
+
+- **Random Forest**: se escogen tantos mtry como variables hay en el modelo, el mtry especifica el numero de variables que coge de manera randon por cada split para quedarse con la mejor.
+
+```{r eval=F}
+set.seed(7)
+# ##seguir con esto
+rfGrid <-  expand.grid(mtry = seq(1,79,2))
+# control_rf <- trainControl("oob")
+clusterCPU <- makePSOCKcluster(detectCores()-1)
+registerDoParallel(clusterCPU)
+t<-Sys.time()
+rf <- train(Revenue ~ ., data = entrenamiento,
+             method = "rf",
+             metric = metrica,
+             trControl = control,
+             tuneGrid = rfGrid)
+Sys.time()-t #Time difference of 6.004942 mins
+save_model(rf)
+stopCluster(clusterCPU)
+```
+```{r message=F}
+set.seed(7)
+rf<-readRDS("rf.Rdata")
+ggplot(rf, highlight = TRUE) +
+  labs(title = "Evolución del ROC del modelo Random Forest", x = "K")
+#prediccion
+prediccion_rf<- predict(rf,validacion)
+prediccion_rf <- factor(prediccion_rf)
+#vemos si hay discordancias entre las métricas que puedan indicar over o under fitting
+rf$bestTune
+paged_table(rf$results[which(rf$results[,1]==19),])
+confusionMatrix(data = prediccion_rf, reference = validacion$Revenue)
+```
+
+Al igual que ocurre con los anteriores se observa que las métricas son similares para las dos muestras. 
+
+
+
+## Modelos finales, resultados y comparativa
+
+Se presentan a continuación los modelos finales y sus resultados:
+
+```{r }
+set.seed(7)
+#GLM
+plot(varImp(glm),top=15, main="Importancia variables modelo GLM")
+#Perceptron Multicapa
+roc_mlp<-Resul_Modelo(mlp)
+#Máquina vector de soporte
+roc_svm<-Resul_Modelo(svm)
+#K vecinos
+roc_knn<-Resul_Modelo(knn2)
+#Adaboost
+roc_boost<-Resul_Modelo(boost)
+#Random forest
+roc_rf<-Resul_Modelo(rf)
+```
+
+Se puede observar que en todos los modelos las variables que más importancia tienen son `PageValues` como principal y luego `ExitRates`, `ProductRelated_Duration`, `Administrative_Duration`, `Administrative` y `Month`. La importancia de las variables cambia según el modelo, pero todas se distribuyen más o menos de la misma manera. Finalmente `Browser`, `TrafficType` and `Region` son las variables que menos importancia tienen. Claramente, las variables que más importancia tienen son las relacionadas con las visitas a las páginas y la duración de las mismas para cada sesión. El valor de la página indica que en esa página se han vendido productos por lo tanto tendrá importancia, cuanto más se venda es más probable que se vuelva a vender. Los datos relacionados con la duración de las sesiones también son importantes, quiere decir que los usuarios que más tiempo pasan en una página son los que más probablemente compren. Finalmente el mes de Noviembre es el que más importancia tiene (como se vio en el analiss exploratorio), probablemente por el black friday y las compras pre-navidad. 
+
+### Tabla comparativa de modelos
+```{r}
+set.seed(7)
+confusion_mlp <- confusionMatrix(data = prediccion_mlp, reference = validacion$Revenue)
+confusion_svm <- confusionMatrix(data = prediccion_svm, reference = validacion$Revenue)
+confusion_knn <- confusionMatrix(data = prediccion_knn, reference = validacion$Revenue)
+confusion_boost <- confusionMatrix(data = prediccion_boost, reference = validacion$Revenue)
+confusion_rf <- confusionMatrix(data = prediccion_rf, reference = validacion$Revenue)
+resultados <- data.frame(
+  modelo=c(mlp$modelInfo$label,
+           svm$modelInfo$label,
+           knn$modelInfo$label,
+           boost$modelInfo$label,
+           rf$modelInfo$label),
+  
+  AUC=round(c(auc(roc_mlp),
+               auc(roc_svm),
+               auc(roc_knn),
+               auc(roc_boost),
+               auc(roc_rf)),digits=3),
+
+  
+  Accuracy=round(c(confusion_mlp[["overall"]][["Accuracy"]],
+                    confusion_svm[["overall"]][["Accuracy"]],
+                    confusion_knn[["overall"]][["Accuracy"]],
+                    confusion_boost[["overall"]][["Accuracy"]],
+                    confusion_rf[["overall"]][["Accuracy"]]),digits=3),
+
+  
+  AciertosClaseSI=round(c(confusion_mlp[["byClass"]][["Pos Pred Value"]],
+                          confusion_svm[["byClass"]][["Pos Pred Value"]],
+                          confusion_knn[["byClass"]][["Pos Pred Value"]],
+                          confusion_boost[["byClass"]][["Pos Pred Value"]],
+                          confusion_rf[["byClass"]][["Pos Pred Value"]]),digits=3),
+  
+  AciertosClaseNO=round(c(confusion_mlp[["byClass"]][["Neg Pred Value"]],
+                          confusion_svm[["byClass"]][["Neg Pred Value"]],
+                          confusion_knn[["byClass"]][["Neg Pred Value"]],
+                          confusion_boost[["byClass"]][["Neg Pred Value"]],
+                          confusion_rf[["byClass"]][["Neg Pred Value"]]),digits=3))
+
+
+
+
+resultados %>%
+  mutate(
+    modelo = modelo,
+    AUC = color_tile("white", "orange")(AUC),
+    Accuracy = color_tile("white", "lightblue")(Accuracy),
+    AciertosClaseSI = color_tile("white", "hotpink")(AciertosClaseSI),
+    AciertosClaseNO = color_tile("white", "hotpink")(AciertosClaseNO)
+  ) %>%
+  select(modelo, everything()) %>%
+  kable(escape = F) %>%
+  kable_styling("hover", full_width = F) %>%
+  add_header_above(c(" ", "Test" = 4))
+```
+
+Los clasificadores que proporcionan un AUC por encima de 0.92 se consideran muy buenos y entre 0,75-0,92 buenos, por tanto, redes neuronales, maquinas vectores de soporte y k-vecinos dan buenos reusltados y los otros dos proporcionan muy buenos resultados. Redes neuronales y maquinas vector de soporte proporcionan resultados muy parecidos, siendo un poco mejor las redes neuronales al proporcionar mejor AUC y más precisión, sin embargo el balance entre los aciertos de la clase si y la clase no es mejor en máquinas vectores de soporte. Adaboost y Random forest proporcionan mejores resultados que los dos anteriors ya que presentan un AUC y Accuracy más alto, entre ellos son muy similares. Al ser tan similares el metodo sleccionado como mejor sería Random forest por tener todas las métricas más altas, además de ser un método muy rápido.
+
+```{r warning=F, message=FALSE}
+modelos<- list(GLM=glm, MLP=mlp, SVM=svm, KNN=knn, ADABOOST=boost, RF=rf)
+Comparativa <- as.data.frame(Result (modelos))
+Comparativa %>%
+  mutate(
+    ROC = color_tile("white", "orange")(ROC),
+    `ROC Validación` = color_tile("white", "orange")(`ROC Validación`),
+    Sens = color_tile("white", "lightblue")(Sens),
+    Spec= color_tile("white", "lightblue")(Spec),
+    Accuracy = color_tile("white", "hotpink")(Accuracy),
+    Kappa = color_tile("white", "hotpink")(Kappa)
+  ) %>%
+  select(everything()) %>%
+  kable(escape = F) %>%
+  kable_styling("hover", full_width = F) 
+
+```
+
+
+
+```{r warning=FALSE}
+#Resultados por modelo
+resultados <- resamples(modelos)
+metricas_resamples <- resultados$values %>%
+                         gather(key = "modelo", value = "valor", -Resample) %>%
+                         separate(col = "modelo", into = c("modelo", "metrica"),
+                                  sep = "~", remove = TRUE)
+
+metricas_resamples %>% filter(metrica == "Accuracy") %>%
+  group_by(modelo) %>% 
+  mutate(media = mean(valor)) %>%
+  ungroup() %>%
+  ggplot(aes(x = reorder(modelo, media), y = valor, color = modelo)) +
+    geom_boxplot(alpha = 0.6, outlier.shape = NA) +
+    geom_jitter(width = 0.1, alpha = 0.6) +
+    scale_y_continuous(limits = c(0.7, 0.9)) +
+    labs(title = "Validación: Accuracy medio repeated-CV",
+         subtitle = "Modelos ordenados por media") +
+    coord_flip() +
+    theme(legend.position = "none")
+metricas_resamples %>% filter(metrica == "ROC") %>%
+  group_by(modelo) %>% 
+  mutate(media = mean(valor)) %>%
+  ungroup() %>%
+  ggplot(aes(x = reorder(modelo, media), y = valor, color = modelo)) +
+    geom_boxplot(alpha = 0.6, outlier.shape = NA) +
+    geom_jitter(width = 0.1, alpha = 0.6) +
+    scale_y_continuous(limits = c(0.8, 1)) +
+    labs(title = "Validación: ROC medio repeated-CV",
+         subtitle = "Modelos ordenados por media") +
+    coord_flip() +
+    theme(legend.position = "none")
+metricas_resamples %>% filter(metrica == "Kappa") %>%
+  group_by(modelo) %>% 
+  mutate(media = mean(valor)) %>%
+  ungroup() %>%
+  ggplot(aes(x = reorder(modelo, media), y = valor, color = modelo)) +
+    geom_boxplot(alpha = 0.6, outlier.shape = NA) +
+    geom_jitter(width = 0.1, alpha = 0.6) +
+    scale_y_continuous(limits = c(0.5, 0.8)) +
+    labs(title = "Validación: Kappa medio repeated-CV",
+         subtitle = "Modelos ordenados por media") +
+    coord_flip() +
+    theme(legend.position = "none")
+```
+
+```{r fig.height = 4, fig.width = 10, fig.align = "center"}
+#para verlos en las mismas escalas
+dotplot(resultados,layout = c(5, 1))
+```
+
+
+Se puede observar como el modelo GLM proporciona mejor rendimiento en general que KNN. SVM, GLM y KNN tienen una mayor sensibilidad que RF, ADABOOST o MLP pero en el resto de medidas están bastante por debajo. No solo nos interesa clasificar bien a los positivos, sino a los negativos. Aunque en este caso particular lo más interesante sea clasificar bien a los positivos ya que son los que van a comprar, para poder aplicar las medidas necesarias para incentivar este caso.
+
+Se muestran más métricas para los resultados, se observa que para la mayoría (excepto knn que es el peor método) el índice Kappa está por encima de 0.6 lo que indica concordancia elevada, este estadístico determina la precision del modelo a la hora de predecir la clase verdadera.
+
+#### Diferencias entre modelos
+```{r fig.height = 4, fig.width = 10, fig.align = "center"}
+#Diferencias entre modelos
+diferencias <- diff(resultados)
+summary(diferencias)
+bwplot(diferencias,layout = c(5, 1))
+```
+
+
+La tabla de diferencias nos indica encima de la diagonal las diferencias en las métricas de cada modelo y en por debajo el pvalor asociado a estas diferencias siendo la hipótesis nula la no diferencia. Por ejemplo el accuracy de ADABOOST y MLP tiene un pvalor de 0.70, por lo tanto y como se puede ver en la tabla superior, la hipoteis nula de no diferencia se acepta. Como se ha dicho anteriormente, el modelo que mejor resultados da en todas las métricas es random forest.
+
+## Resultados Random Forest
+
+```{r}
+print(rf$finalModel)
+table(prediccion_rf,validacion$Revenue)
+```
+
+Como se puede observar los errores en la clasificación se estabilizan aproximadamente al llegar a los 100 arboles, los errores en las predicciones son de un 10 y un 16% para la clase `no` y `si`, respectivamente. No son errores muy grandes que podrían disminuirse si se tuviese una base de datos más amplia.
+
+
+
+```{r }
+plot(varImp(rf),top=15)
+```
+
+```{r fig.height = 7, fig.width = 6, fig.align = "center"}
+varImpPlot(rf$finalModel)
+```
+
+Si vemos la importancia medida en valores del indice de Gini, el cual nos indica la importancia de la variable a la hora de separar los nodos, como ve observa ni las regiones, ni el tipo de trafico, sistemas operativos o navegadores tienen casi importancia a la hora de separar los nodos.
+
+Vamos a ver un sumario de los bien y mal clasificados de las variables más importantes
+
+```{r results='asis'}
+#Mal clasificados
+kable(
+  summary(validacion[which(prediccion_rf != validacion$Revenue & validacion$Revenue=="n"),
+    c("PageValues","ExitRates","ProductRelated_Duration","Administrative_Duration", 
+      "Administrative","Month")]),
+  caption = "Resumen Falsos Negativos") %>%
+  kable_styling("hover") 
+
+kable(
+    summary(validacion[which(prediccion_rf != validacion$Revenue & validacion$Revenue=="y"),
+      c("PageValues","ExitRates","ProductRelated_Duration","Administrative_Duration", 
+        "Administrative","Month")]),
+        caption = "Resumen Falsos Positivos")%>%
+        kable_styling("hover")
+
+
+#Bien clasificados
+kable(
+  summary(validacion[which(prediccion_rf == validacion$Revenue & validacion$Revenue=="n"),
+      c("PageValues","ExitRates","ProductRelated_Duration","Administrative_Duration", 
+        "Administrative","Month")]), 
+        caption = "Resumen Verdaderos negativos")%>%
+        kable_styling("hover", full_width = F) 
+kable(
+  summary(validacion[which(prediccion_rf == validacion$Revenue & validacion$Revenue=="y"),
+      c("PageValues","ExitRates","ProductRelated_Duration","Administrative_Duration", 
+        "Administrative","Month")]), 
+        caption = "Resumen Verdaderos positivos")%>%
+        kable_styling("hover", full_width = F) 
+```
+
+
+
+Finalmente podemos sacar las siguientes conclusiones
+
+- Como se había comentado anteriormente, escogiendo el modelo random Forest obtenemos los mejores resultados de clasificación. 
+- Las variables que más importancia tiemen son PageValues, ExitRates que son estadisticas de google que nos indican el valor monetario de la pagina y el porcentaje de visitas en las que esa pagina fue la ultima de la sesion.  Esto tiene sentido al ser una pagina en la que se compra mucho, tiene un valor de pagina alto y el porcentaje de visitas en las que fue la ultima pagina visitada será alto puesto que compras y ya no vuelves a entrar. Dichos valores son buenos a la hora de clasificar pero no dan mucha más información. 
+- Las siguientes caracteristicas que más afectan son la duracion de visitas a paginas relacionadas con el producto o administrativas, lo cual es logico y nos puede dar una indicacion de cuando un cliente pasa mucho tiempo mirando las paginas es mas probable que compre.  
+- Lo más interesante son los datos de Meses, que el que más importancia tiene es noviembre (compras pre-navidad o Black Friday) y mayo, en el análisis exploratorio indicaban un nivel más alto de compras. 
+- Otra variable que tiene cierta importancia al clasificar es el tipo de visitante que vuelve. Que ya presentaba una mayor proporción de compras que los otros.
+- Sin embargo las grandes diferencias que se veían en las proporciones de compra entre unos navegadores y otros y entre sistemas operativos no tienen casi importancia a pesar de ser muy altas. 
+- El resto de variables no se muestra ya que su importancia es muy baja y no afectan a la decisión del comprador, por otra parte como cabría de esperar. 
+- Si vemos la importancia medida en valores del indice de Gini, el cual nos indica la importancia de la variable a la hora de separar los nodos, como ve observa ni las regiones, ni el tipo de trafico, sistemas operativos o navegadores tienen casi importancia a la hora de separar los nodos.
+
+## Comentarios finales, dudas y dificultades
+
+Me ha resultado muy dificil realizar el preprocesado porque me han surgido muchas dudas.
+
+
+- El tratamiento de los outliers no he sabido como hacerlo, si bien es cierto que indicaron en el foro que la base estaba depurada, me gustaría saber bien como tratar este tema.
+- A la hora de balancear quise usar el métidi del cubo, pero al haber muchas variables continuas no pude, factorizar en ese caso no es una opción ya que la distribución no es normal. Luego se me ocurrió que se podría haber hecho una transformacion logaritmica a esos datos y factorizar esa misma, pero ya no me daba tiempo a entrenar todos los modelos de nuevo y comentar nuevos resultados
+- A la hora de balancear la base de datos y de hacer las pariticiones me surgió la duda de si balancearlo todo, o hacer el balanceo solo de la muestra de entrenamiento y dejar la de validación sin balancear. Al final opté por la primera opción, tal y como está hecho en los ejercicios de clase.
+- A la hora de tratar con variables catergóricas numéricas no ordinales no sabía muy bien como proceder, ya que al no ser ordinales ¿afecta el valor que tengan a la hora de hacer la clasificación? La opción que me planteaba es crear dummies de esas categóricas, pero resultan casi 80 variables. Como ya tenía algunos modelos entrenados con las categóricas como se proporcionan no he seguido con ese procedimiento.
+- Me habría gustado hacer una seleccion de variables y más en el caso de que se pasasen las variables a dummy, pero he intentado hacerlo con el paquete de caret que nos indicaron en el documento y no he sido capaz de hacerlo.
+- También había pensado en hacer un modelo sencillo, que tarde poco aunque no sea el mejor y escoger las variables que su importancia esté por encima de cierto valor. ¿eso sería correcto?
+- Otra duda que me surgió es si convertir las variables numericas a logaritmos, hice una primera prueba con random forest, pero el resultado no difería mucho de lo calculado anteriormente tanto en precision, como en importancia de variables.
+- Porqué sale el AUC de random forest = 1?
+
