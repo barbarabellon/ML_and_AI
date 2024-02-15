@@ -1,1 +1,2 @@
-Practical exercises for master in Data Science and machine Learning
+# ML-and-AI
+Personal collection of ML and AI projects in R and Python
